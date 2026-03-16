@@ -1,0 +1,102 @@
+version: "3.9"
+
+# DalkkakAI — local dev stack
+#
+# Start dev server:   docker-compose up
+# Run all tests:      docker-compose --profile test up --abort-on-container-exit
+# Reset everything:   docker-compose down -v
+
+services:
+
+  # ── PostgreSQL ──────────────────────────────────────────────────────────────
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: dalkkak
+      POSTGRES_PASSWORD: dalkkak
+      POSTGRES_DB: dalkkak
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U dalkkak"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # ── Redis ───────────────────────────────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # ── FastAPI ─────────────────────────────────────────────────────────────────
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      DATABASE_URL: postgresql+asyncpg://dalkkak:dalkkak@db:5432/dalkkak
+      REDIS_URL: redis://redis:6379
+      SECRET_KEY: dev-secret-key-replace-in-production
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-placeholder}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-placeholder}
+      GOOGLE_AI_API_KEY: ${GOOGLE_AI_API_KEY:-placeholder}
+      ENVIRONMENT: development
+      CORS_ORIGINS: http://localhost:3000
+    ports:
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - .:/app
+      - workspace_data:/workspace
+    command: >
+      sh -c "alembic upgrade head &&
+             uvicorn backend.main:app --host 0.0.0.0 --port 8000 --reload"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8000/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+  # ── Test runner ─────────────────────────────────────────────────────────────
+  # Only starts when you use: docker-compose --profile test up
+  # Waits for API to be healthy, then runs all tests and exits.
+  test:
+    profiles: ["test"]
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      DATABASE_URL: postgresql+asyncpg://dalkkak:dalkkak@db:5432/dalkkak
+      REDIS_URL: redis://redis:6379
+      SECRET_KEY: dev-secret-key-replace-in-production
+      ANTHROPIC_API_KEY: placeholder
+      ENVIRONMENT: development
+      API_URL: http://api:8000
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      api:
+        condition: service_healthy
+    volumes:
+      - .:/app
+    command: >
+      sh -c "pytest tests/ -v --tb=short --color=yes"
+
+volumes:
+  postgres_data:
+  workspace_data:
