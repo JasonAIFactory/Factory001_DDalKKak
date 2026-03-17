@@ -36,6 +36,12 @@ class User(Base, TimestampMixin):
         String(20), nullable=False, default="free"
     )  # free | starter | growth | scale
 
+    # User's own Anthropic API key (BYOK — Bring Your Own Key)
+    # If set, ALL AI calls for this user use their key instead of the platform key.
+    anthropic_api_key: Mapped[str | None] = mapped_column(
+        String(255), nullable=True
+    )
+
     stripe_customer_id: Mapped[str | None] = mapped_column(
         String(100), nullable=True
     )

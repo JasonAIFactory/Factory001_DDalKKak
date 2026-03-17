@@ -29,7 +29,7 @@ from backend.config import settings
 
 logger = logging.getLogger(__name__)
 
-_client = anthropic.AsyncAnthropic(api_key=settings.ANTHROPIC_API_KEY)
+_platform_client = anthropic.AsyncAnthropic(api_key=settings.ANTHROPIC_API_KEY)
 
 # ── Model IDs ─────────────────────────────────────────────────────────────────
 _MODEL_MAP = {
@@ -125,6 +125,7 @@ class AgentExecutor:
         description: str,
         agent_type: str,
         model_tier: str,
+        api_key: str | None = None,
     ) -> None:
         self.session_id = session_id
         self.startup_id = startup_id
@@ -133,6 +134,12 @@ class AgentExecutor:
         self.description = description
         self.agent_type = agent_type
         self.model_id = _MODEL_MAP.get(model_tier, _MODEL_MAP["sonnet"])
+        # BYOK: use user's key if provided, otherwise fall back to platform key
+        self._client = (
+            anthropic.AsyncAnthropic(api_key=api_key)
+            if api_key
+            else _platform_client
+        )
 
         self.tool_executor = ToolExecutor(worktree_path, startup_id, session_id)
         self.conversation: list[dict] = []
@@ -192,7 +199,7 @@ class AgentExecutor:
 
             # ── Call Claude API ───────────────────────────────────────
             try:
-                response = await _client.messages.create(
+                response = await self._client.messages.create(
                     model=self.model_id,
                     max_tokens=4000,
                     system=_build_system_prompt(
@@ -204,6 +211,14 @@ class AgentExecutor:
             except anthropic.RateLimitError:
                 await asyncio.sleep(10)
                 continue
+            except anthropic.BadRequestError as exc:
+                # Parse human-readable message from Anthropic error body
+                try:
+                    msg = exc.body["error"]["message"]  # type: ignore[index]
+                except Exception:
+                    msg = str(exc)
+                logger.error("Anthropic bad request in session %s: %s", self.session_id, msg)
+                return ExecutionResult(success=False, error=msg)
             except anthropic.APIError as exc:
                 logger.exception("Anthropic API error in session %s", self.session_id)
                 return ExecutionResult(success=False, error=f"AI API error: {exc}")

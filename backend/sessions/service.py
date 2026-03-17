@@ -99,14 +99,13 @@ async def create_session(
     db.add(session)
     await db.flush()  # get the ID before creating worktree
 
-    # Create isolated git worktree (if startup has a repo)
-    if startup.git_repo_url:
-        result = await create_worktree(
-            repo_path=_get_local_repo_path(startup),
-            branch=branch,
-        )
-        if result.success:
-            session.worktree_path = result.path
+    # Create isolated git worktree (always — local repo at /workspace/{startup_id})
+    result = await create_worktree(
+        repo_path=_get_local_repo_path(startup),
+        branch=branch,
+    )
+    if result.success:
+        session.worktree_path = result.path
 
     return session
 

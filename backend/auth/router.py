@@ -13,7 +13,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.auth.deps import get_current_user
-from backend.auth.schemas import AuthResponse, LoginRequest, RegisterRequest, TokenResponse, UserResponse
+from backend.auth.schemas import AuthResponse, LoginRequest, RegisterRequest, SaveApiKeyRequest, TokenResponse, UserResponse
 from backend.auth.service import authenticate_user, create_access_token, create_user
 from backend.database import get_db
 from backend.models.user import User
@@ -89,6 +89,33 @@ async def me(current_user: User = Depends(get_current_user)) -> dict:
         "ok": True,
         "data": UserResponse.model_validate(current_user).model_dump(),
     }
+
+
+@router.put("/me/api-key", response_model=dict)
+async def save_api_key(
+    body: SaveApiKeyRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """
+    Save (or replace) the user's own Anthropic API key.
+    This key will be used for all AI sessions instead of the platform key.
+    The raw key is stored — never returned in responses.
+    """
+    current_user.anthropic_api_key = body.anthropic_api_key
+    await db.flush()
+    return {"ok": True, "data": {"has_api_key": True}}
+
+
+@router.delete("/me/api-key", response_model=dict)
+async def delete_api_key(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Remove the user's saved API key. Sessions will use the platform key."""
+    current_user.anthropic_api_key = None
+    await db.flush()
+    return {"ok": True, "data": {"has_api_key": False}}
 
 
 @router.post("/refresh", response_model=dict)

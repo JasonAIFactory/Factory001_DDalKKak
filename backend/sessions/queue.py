@@ -78,7 +78,15 @@ async def _get_user_plan(db: DbSession, user_id: str) -> str:
     return row or "free"
 
 
-async def _dispatch_session(session: Session, startup: Startup) -> None:
+async def _get_user_api_key(db: DbSession, user_id: str) -> str | None:
+    """Return the user's own Anthropic API key, or None to use the platform key."""
+    result = await db.execute(
+        select(User.anthropic_api_key).where(User.id == user_id)
+    )
+    return result.scalar_one_or_none()
+
+
+async def _dispatch_session(session: Session, startup: Startup, user_api_key: str | None = None) -> None:
     """
     Run a session in the background.
     Updates session status before and after execution.
@@ -112,6 +120,7 @@ async def _dispatch_session(session: Session, startup: Startup) -> None:
             description=session.description,
             agent_type=session.agent_type,
             model_tier=session.model_tier,
+            api_key=user_api_key,
         )
 
         result = await executor.run()
@@ -230,14 +239,16 @@ async def _process_queue_tick() -> None:
             if not startup:
                 continue
 
+            user_api_key = await _get_user_api_key(db, user_id)
+
             logger.info(
-                "Dispatching session: session=%s user=%s plan=%s (%d/%d running)",
-                session.id, user_id, plan, running + 1, limit,
+                "Dispatching session: session=%s user=%s plan=%s (%d/%d running) byok=%s",
+                session.id, user_id, plan, running + 1, limit, bool(user_api_key),
             )
 
             # Dispatch as a background task — don't await it here
             # so the queue worker can pick up the next session immediately
-            asyncio.create_task(_dispatch_session(session, startup))
+            asyncio.create_task(_dispatch_session(session, startup, user_api_key))
 
 
 async def run_queue_worker() -> None:

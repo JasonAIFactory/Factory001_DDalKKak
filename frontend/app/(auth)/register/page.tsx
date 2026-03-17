@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { auth, setToken, type AuthResponse } from "@/lib/api";
+import { auth, setToken } from "@/lib/api";
 
 /**
  * Register page — creates account then immediately logs in.

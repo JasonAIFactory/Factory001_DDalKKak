@@ -39,15 +39,30 @@ class LoginRequest(BaseModel):
 # ── Response models ───────────────────────────────────────────────────────────
 
 class UserResponse(BaseModel):
-    """Safe user representation — never includes hashed_password."""
+    """Safe user representation — never exposes hashed_password or raw API keys."""
 
     id: uuid.UUID
     email: str
     name: str
     plan: str
     onboarding_complete: bool
+    has_api_key: bool = False  # True if user has saved their own Anthropic key
 
     model_config = {"from_attributes": True}
+
+    @classmethod
+    def model_validate(cls, obj: object, **kwargs: object) -> "UserResponse":
+        """Override to compute has_api_key from the raw model field."""
+        data = super().model_validate(obj, **kwargs)
+        if hasattr(obj, "anthropic_api_key"):
+            data.has_api_key = bool(obj.anthropic_api_key)  # type: ignore[union-attr]
+        return data
+
+
+class SaveApiKeyRequest(BaseModel):
+    """Payload for PUT /auth/me/api-key."""
+
+    anthropic_api_key: str = Field(min_length=10, max_length=255)
 
 
 class TokenResponse(BaseModel):

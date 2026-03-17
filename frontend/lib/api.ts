@@ -32,6 +32,7 @@ export interface User {
   email: string;
   name: string;
   plan: string;
+  has_api_key: boolean;
   created_at: string;
 }
 
@@ -133,6 +134,17 @@ export const auth = {
     }),
 
   me: () => request<User>("/api/auth/me"),
+
+  saveApiKey: (key: string) =>
+    request<{ has_api_key: boolean }>("/api/auth/me/api-key", {
+      method: "PUT",
+      body: JSON.stringify({ anthropic_api_key: key }),
+    }),
+
+  deleteApiKey: () =>
+    request<{ has_api_key: boolean }>("/api/auth/me/api-key", {
+      method: "DELETE",
+    }),
 };
 
 // ── Startups API ─────────────────────────────────────────────────────────────

@@ -143,7 +143,7 @@ export default function DashboardPage() {
         <div className="text-center py-20 border border-dashed border-gray-800 rounded-2xl">
           <Rocket className="w-10 h-10 text-gray-600 mx-auto mb-4" />
           <h3 className="text-white font-medium mb-2">No startups yet</h3>
-          <p className="text-gray-500 text-sm mb-6">Describe your idea and we'll build it for you.</p>
+          <p className="text-gray-500 text-sm mb-6">Describe your idea and we&apos;ll build it for you.</p>
           <button
             onClick={() => setShowNewForm(true)}
             className="bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-medium px-5 py-2.5 rounded-lg transition-colors"

@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { useRouter, usePathname } from "next/navigation";
 import Link from "next/link";
 import { auth, clearToken, getToken, type User } from "@/lib/api";
-import { LayoutDashboard, Rocket, LogOut, Zap } from "lucide-react";
+import { LayoutDashboard, Rocket, LogOut, Zap, Settings } from "lucide-react";
 
 /**
  * Dashboard layout — sidebar + main content area.
@@ -42,6 +42,7 @@ export default function DashboardLayout({
   const navItems = [
     { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
     { href: "/startups", label: "My Startups", icon: Rocket },
+    { href: "/settings", label: "Settings", icon: Settings },
   ];
 
   return (
