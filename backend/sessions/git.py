@@ -42,19 +42,60 @@ async def _run_git(args: list[str], cwd: str) -> tuple[int, str, str]:
     Returns (returncode, stdout, stderr).
     Never raises — callers check returncode.
     """
-    proc = await asyncio.create_subprocess_exec(
-        "git",
-        *args,
-        cwd=cwd,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "git",
+            *args,
+            cwd=cwd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout_bytes, stderr_bytes = await proc.communicate()
+        return (
+            proc.returncode or 0,
+            stdout_bytes.decode("utf-8", errors="replace").strip(),
+            stderr_bytes.decode("utf-8", errors="replace").strip(),
+        )
+    except (FileNotFoundError, OSError) as exc:
+        return (1, "", str(exc))
+
+
+async def _ensure_repo(repo_path: str) -> bool:
+    """
+    Ensure a git repo exists at repo_path.
+    Creates and initializes it if missing — handles startups created before the git-init fix.
+    Returns True if repo is ready.
+    """
+    import os
+    import subprocess
+
+    path = Path(repo_path)
+    if not path.exists():
+        path.mkdir(parents=True, exist_ok=True)
+
+    # Check if already a git repo
+    rc, _, _ = await _run_git(["rev-parse", "--git-dir"], cwd=repo_path)
+    if rc == 0:
+        return True  # already initialized
+
+    # Init fresh repo with an empty commit so branches can be created
+    env = {
+        **os.environ,
+        "GIT_AUTHOR_NAME": "DalkkakAI",
+        "GIT_AUTHOR_EMAIL": "bot@dalkkak.ai",
+        "GIT_COMMITTER_NAME": "DalkkakAI",
+        "GIT_COMMITTER_EMAIL": "bot@dalkkak.ai",
+    }
+    await asyncio.to_thread(
+        subprocess.run, ["git", "init", "-b", "main", repo_path], capture_output=True
     )
-    stdout_bytes, stderr_bytes = await proc.communicate()
-    return (
-        proc.returncode or 0,
-        stdout_bytes.decode("utf-8", errors="replace").strip(),
-        stderr_bytes.decode("utf-8", errors="replace").strip(),
+    await asyncio.to_thread(
+        subprocess.run,
+        ["git", "commit", "--allow-empty", "-m", "init"],
+        cwd=repo_path, capture_output=True, env=env,
     )
+    logger.info("Auto-initialized git repo: %s", repo_path)
+    return True
 
 
 async def create_worktree(repo_path: str, branch: str) -> WorktreeResult:
@@ -62,14 +103,18 @@ async def create_worktree(repo_path: str, branch: str) -> WorktreeResult:
     Create an isolated git worktree for a session.
 
     What happens:
-      1. Create a new branch from main
-      2. Create a worktree directory for that branch
-      3. Return the worktree path
+      1. Ensure the base repo exists (auto-init if missing)
+      2. Create a new branch from main
+      3. Create a worktree directory for that branch
+      4. Return the worktree path
 
     Each session gets complete file isolation — no conflicts
     with other running sessions until merge time.
     """
     worktree_path = str(Path(repo_path) / "worktrees" / branch)
+
+    # Ensure repo exists — auto-init if startup predates the git-init fix
+    await _ensure_repo(repo_path)
 
     # Create branch from main
     rc, _, err = await _run_git(["branch", branch, "main"], cwd=repo_path)

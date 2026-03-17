@@ -64,9 +64,13 @@ export interface Session {
   title: string;
   progress: number;
   model_used: string | null;
-  cost_usd: number;
+  cost_usd: number | null;
+  model_calls: number;
   branch_name: string | null;
   preview_url: string | null;
+  summary: string | null;
+  error_message: string | null;
+  files_changed: string[];
   created_at: string;
 }
 
