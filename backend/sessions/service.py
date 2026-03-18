@@ -97,15 +97,17 @@ async def create_session(
         status="created",
     )
     db.add(session)
-    await db.flush()  # get the ID before creating worktree
+    await db.flush()
 
-    # Create isolated git worktree (always — local repo at /workspace/{startup_id})
-    result = await create_worktree(
-        repo_path=_get_local_repo_path(startup),
-        branch=branch,
-    )
-    if result.success:
-        session.worktree_path = result.path
+    # Terminal sessions skip worktree — user works in shared /workspace
+    # Auto AI sessions need isolated worktree for parallel file writes
+    if agent_type != "terminal":
+        result = await create_worktree(
+            repo_path=_get_local_repo_path(startup),
+            branch=branch,
+        )
+        if result.success:
+            session.worktree_path = result.path
 
     return session
 
