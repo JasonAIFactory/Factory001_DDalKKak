@@ -5,6 +5,32 @@
 
 ---
 
+## RULE #-1 — LEARNING LOGS (SUPREME DIRECTIVE)
+
+**Every concept, explanation, architecture decision, and Q&A MUST be recorded in `logs/learning/YYYY-MM-DD.md` AS IT HAPPENS.**
+
+This is Jason's #1 directive. Higher priority than any other rule. Jason said:
+> "이거는 제1 지침이야. 어떤 상황에서도 꼭 수행되야해."
+> "나는 아무것도 모르는 병신인채로 만들고싶지 않다고. 이게 나의 자산이라고."
+
+**What to record:**
+- Every question Jason asks → record question + full answer
+- Every architecture decision → record decision + why + alternatives considered
+- Every bug → record what broke, root cause, and fix
+- Every new concept explained → record concept + how it works + real example
+- Every tool/library introduced → record what it does + why it was chosen
+
+**When to record:**
+- IMMEDIATELY when explaining — not at end of session
+- Before every git commit — verify log is up to date
+- If in doubt → record it. Too much is better than too little.
+
+**English corrections** go in `logs/english/YYYY-MM-DD.md` — every Korean message from Jason gets an English improvement logged.
+
+Violating this rule means Jason learns nothing. That is the worst possible outcome.
+
+---
+
 ## RULE #0 — LANGUAGE (NON-NEGOTIABLE)
 
 **Claude must always respond in English. Zero exceptions.**
