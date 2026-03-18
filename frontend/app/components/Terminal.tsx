@@ -118,6 +118,33 @@ export default function Terminal({
         setConnected(false);
       };
 
+      // Copy on select (Ctrl+C copies when text selected, sends SIGINT otherwise)
+      term.onSelectionChange(() => {
+        const sel = term.getSelection();
+        if (sel) {
+          navigator.clipboard.writeText(sel).catch(() => {});
+        }
+      });
+
+      // Paste support (Ctrl+V)
+      term.attachCustomKeyEventHandler((e: KeyboardEvent) => {
+        if (e.type === "keydown" && e.ctrlKey && e.key === "v") {
+          navigator.clipboard.readText().then((text) => {
+            if (ws && ws.readyState === WebSocket.OPEN) {
+              ws.send(new TextEncoder().encode(text));
+            }
+          }).catch(() => {});
+          return false;
+        }
+        // Ctrl+C with selection = copy (don't send to PTY)
+        if (e.type === "keydown" && e.ctrlKey && e.key === "c" && term.hasSelection()) {
+          navigator.clipboard.writeText(term.getSelection()).catch(() => {});
+          term.clearSelection();
+          return false;
+        }
+        return true;
+      });
+
       // Send keystrokes as binary
       term.onData((data: string) => {
         if (ws && ws.readyState === WebSocket.OPEN) {
