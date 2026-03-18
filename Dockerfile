@@ -22,6 +22,9 @@ RUN npm install -g @anthropic-ai/claude-code 2>/dev/null || echo "Claude Code CL
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
+# tmux config (mouse, colors, vi keys, status bar)
+COPY config/tmux.conf /root/.tmux.conf
+
 # Copy source
 COPY . .
 
