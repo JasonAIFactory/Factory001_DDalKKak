@@ -110,9 +110,9 @@ function SessionCard({
   }
 
   const progress = session.progress ?? 0;
-  const cost = session.cost_usd ?? 0;
+  const cost = session.total_cost ?? 0;
   const filesCount = Array.isArray(session.files_changed) ? session.files_changed.length : 0;
-  const isTerminal = session.type === "terminal";
+  const isTerminal = session.agent_type === "terminal";
 
   return (
     <div
@@ -227,7 +227,7 @@ function SessionDetail({
 }: {
   session: Session; startupId: string; onBack: () => void; onAction: () => void;
 }) {
-  const [tab, setTab] = useState<DetailTab>(session.type === "terminal" ? "terminal" : "chat");
+  const [tab, setTab] = useState<DetailTab>(session.agent_type === "terminal" ? "terminal" : "chat");
   const [feedback, setFeedback] = useState("");
   const [sending, setSending] = useState(false);
   const [messages, setMessages] = useState<{ role: string; content: string; created_at: string }[]>([]);
@@ -273,9 +273,9 @@ function SessionDetail({
 
   const cfg = STATUS_CFG[session.status] ?? STATUS_CFG.queued;
   const progress = session.progress ?? 0;
-  const cost = session.cost_usd ?? 0;
+  const cost = session.total_cost ?? 0;
   const filesCount = Array.isArray(session.files_changed) ? session.files_changed.length : 0;
-  const isTerminal = session.type === "terminal";
+  const isTerminal = session.agent_type === "terminal";
 
   const tabs: { id: DetailTab; label: string; icon: React.ReactNode }[] = [
     ...(isTerminal ? [{ id: "terminal" as DetailTab, label: "Terminal", icon: <TerminalSquare className="w-3.5 h-3.5" /> }] : []),

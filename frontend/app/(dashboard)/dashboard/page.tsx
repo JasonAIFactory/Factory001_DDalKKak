@@ -198,10 +198,10 @@ export default function DashboardPage() {
                     {statusIcon(session.status)}
                     <div className="flex-1 min-w-0">
                       <p className="text-sm text-white truncate">{session.title}</p>
-                      <p className="text-xs text-gray-500">{session.type}</p>
+                      <p className="text-xs text-gray-500">{session.agent_type}</p>
                     </div>
                     <span className="text-xs text-gray-500">
-                      ${(session.cost_usd ?? 0).toFixed(4)}
+                      ${(session.total_cost ?? 0).toFixed(4)}
                     </span>
                   </div>
                 ))}

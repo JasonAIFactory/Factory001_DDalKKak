@@ -59,19 +59,29 @@ export interface Startup {
 export interface Session {
   id: string;
   startup_id: string;
-  type: string;
+  agent_type: string;
   status: string;
   title: string;
+  description: string;
   progress: number;
-  model_used: string | null;
-  cost_usd: number | null;
+  model_tier: string;
+  total_cost: number;
   model_calls: number;
   branch_name: string | null;
-  preview_url: string | null;
-  summary: string | null;
-  error_message: string | null;
   files_changed: string[];
+  lines_added: number;
+  lines_removed: number;
+  test_results: Record<string, unknown>;
+  priority: number;
+  queued_at: string | null;
+  started_at: string | null;
+  completed_at: string | null;
   created_at: string;
+  updated_at: string;
+  // Frontend aliases for convenience
+  preview_url?: string | null;
+  summary?: string | null;
+  error_message?: string | null;
 }
 
 // ── Token storage ────────────────────────────────────────────────────────────
