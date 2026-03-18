@@ -174,18 +174,18 @@ class TerminalSession:
         logger.info("Detached from tmux '%s' (session still alive)", self.session_name)
 
 
-@router.websocket("/ws/terminal")
-async def websocket_terminal(websocket: WebSocket):
+@router.websocket("/ws/terminal/{session_id}")
+async def websocket_terminal(websocket: WebSocket, session_id: str):
     """WebSocket terminal endpoint with tmux persistence.
 
+    Each session_id gets its own tmux session:
     - First connect: creates tmux session + attaches
     - Reconnect: re-attaches to existing session (Claude Code still running)
     - Disconnect: detaches only (tmux session stays alive)
     """
     await websocket.accept()
 
-    # Use a fixed session name per connection (TODO: per-user when auth added)
-    session_name = "dalkkak-main"
+    session_name = f"dalkkak-{session_id[:8]}"
 
     # Create tmux session if it doesn't exist
     if not _tmux_session_exists(session_name):

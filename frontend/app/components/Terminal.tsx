@@ -9,9 +9,11 @@ import { useEffect, useRef, useState } from "react";
  */
 export default function Terminal({
   className = "",
+  sessionId = "main",
   onClose,
 }: {
   className?: string;
+  sessionId?: string;
   onClose?: () => void;
 }) {
   const termRef = useRef<HTMLDivElement>(null);
@@ -86,7 +88,7 @@ export default function Terminal({
 
       // WebSocket to backend PTY
       const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
-      const wsUrl = apiUrl.replace(/^http/, "ws") + "/ws/terminal";
+      const wsUrl = apiUrl.replace(/^http/, "ws") + `/ws/terminal/${sessionId}`;
       ws = new WebSocket(wsUrl);
       ws.binaryType = "arraybuffer";
 

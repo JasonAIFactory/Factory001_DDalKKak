@@ -372,7 +372,7 @@ function SessionDetail({
       {/* Tab content */}
       <div className="flex-1 overflow-auto">
         {tab === "terminal" && (
-          <Terminal className="h-full rounded-none border-0" />
+          <Terminal className="h-full rounded-none border-0" sessionId={session.id} />
         )}
 
         {tab === "chat" && (
