@@ -1,11 +1,11 @@
 "use client";
 
-import { useEffect, useRef, useCallback, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 /**
- * Web terminal component using xterm.js.
- * Connects to backend PTY via WebSocket at /ws/terminal.
- * Users can run `claude` (Claude Code CLI) with their own auth.
+ * Web terminal — real PTY shell via WebSocket.
+ * Identical to iTerm2 / native terminal experience.
+ * Type `claude` to start Claude Code with your own account.
  */
 export default function Terminal({
   className = "",
@@ -15,167 +15,184 @@ export default function Terminal({
   onClose?: () => void;
 }) {
   const termRef = useRef<HTMLDivElement>(null);
-  const wsRef = useRef<WebSocket | null>(null);
-  const xtermRef = useRef<any>(null);
-  const fitRef = useRef<any>(null);
+  const initialized = useRef(false);
   const [connected, setConnected] = useState(false);
 
-  const connect = useCallback(async () => {
-    if (!termRef.current) return;
+  useEffect(() => {
+    if (!termRef.current || initialized.current) return;
+    initialized.current = true;
 
-    // Dynamic imports — xterm is browser-only
-    const { Terminal: XTerm } = await import("@xterm/xterm");
-    const { FitAddon } = await import("@xterm/addon-fit");
-    const { WebLinksAddon } = await import("@xterm/addon-web-links");
+    let ws: WebSocket | null = null;
+    let term: any = null;
+    let fitAddon: any = null;
+    let resizeObserver: ResizeObserver | null = null;
 
-    // Import xterm CSS
-    await import("@xterm/xterm/css/xterm.css");
+    (async () => {
+      const { Terminal: XTerm } = await import("@xterm/xterm");
+      const { FitAddon } = await import("@xterm/addon-fit");
+      const { WebLinksAddon } = await import("@xterm/addon-web-links");
+      await import("@xterm/xterm/css/xterm.css");
 
-    const term = new XTerm({
-      cursorBlink: true,
-      fontSize: 13,
-      fontFamily: "'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace",
-      theme: {
-        background: "#09090b",
-        foreground: "#fafafa",
-        cursor: "#8b5cf6",
-        selectionBackground: "#8b5cf633",
-        black: "#09090b",
-        red: "#ef4444",
-        green: "#10b981",
-        yellow: "#f59e0b",
-        blue: "#3b82f6",
-        magenta: "#8b5cf6",
-        cyan: "#06b6d4",
-        white: "#fafafa",
-        brightBlack: "#52525b",
-        brightRed: "#f87171",
-        brightGreen: "#34d399",
-        brightYellow: "#fbbf24",
-        brightBlue: "#60a5fa",
-        brightMagenta: "#a78bfa",
-        brightCyan: "#22d3ee",
-        brightWhite: "#ffffff",
-      },
-      allowProposedApi: true,
-    });
+      if (!termRef.current) return;
 
-    const fitAddon = new FitAddon();
-    term.loadAddon(fitAddon);
-    term.loadAddon(new WebLinksAddon());
+      term = new XTerm({
+        cursorBlink: true,
+        cursorStyle: "bar",
+        fontSize: 14,
+        fontFamily: "'JetBrains Mono', 'Menlo', 'Monaco', 'Courier New', monospace",
+        fontWeight: "normal",
+        letterSpacing: 0,
+        lineHeight: 1.2,
+        scrollback: 10000,
+        theme: {
+          background: "#1a1b26",
+          foreground: "#c0caf5",
+          cursor: "#c0caf5",
+          cursorAccent: "#1a1b26",
+          selectionBackground: "#33467c",
+          selectionForeground: "#c0caf5",
+          black: "#15161e",
+          red: "#f7768e",
+          green: "#9ece6a",
+          yellow: "#e0af68",
+          blue: "#7aa2f7",
+          magenta: "#bb9af7",
+          cyan: "#7dcfff",
+          white: "#a9b1d6",
+          brightBlack: "#414868",
+          brightRed: "#f7768e",
+          brightGreen: "#9ece6a",
+          brightYellow: "#e0af68",
+          brightBlue: "#7aa2f7",
+          brightMagenta: "#bb9af7",
+          brightCyan: "#7dcfff",
+          brightWhite: "#c0caf5",
+        },
+        allowProposedApi: true,
+        convertEol: false,
+        windowsMode: false,
+      });
 
-    term.open(termRef.current);
-    fitAddon.fit();
+      fitAddon = new FitAddon();
+      term.loadAddon(fitAddon);
+      term.loadAddon(new WebLinksAddon());
 
-    xtermRef.current = term;
-    fitRef.current = fitAddon;
+      term.open(termRef.current);
 
-    // Connect WebSocket to backend PTY
-    const wsProtocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-    const apiHost = process.env.NEXT_PUBLIC_API_URL?.replace(/^https?:\/\//, "") || "localhost:8000";
-    const ws = new WebSocket(`${wsProtocol}//${apiHost}/ws/terminal`);
-    ws.binaryType = "arraybuffer";
+      // Small delay to ensure DOM is ready for fit
+      requestAnimationFrame(() => {
+        fitAddon.fit();
+      });
 
-    ws.onopen = () => {
-      setConnected(true);
-      // Send initial size
-      ws.send(JSON.stringify({
-        type: "resize",
-        cols: term.cols,
-        rows: term.rows,
-      }));
-    };
+      // WebSocket to backend PTY
+      const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+      const wsUrl = apiUrl.replace(/^http/, "ws") + "/ws/terminal";
+      ws = new WebSocket(wsUrl);
+      ws.binaryType = "arraybuffer";
 
-    ws.onmessage = (event) => {
-      if (event.data instanceof ArrayBuffer) {
-        term.write(new Uint8Array(event.data));
-      } else {
-        term.write(event.data);
-      }
-    };
-
-    ws.onclose = () => {
-      setConnected(false);
-      term.write("\r\n\x1b[31m[Connection closed]\x1b[0m\r\n");
-    };
-
-    ws.onerror = () => {
-      setConnected(false);
-      term.write("\r\n\x1b[31m[Connection error]\x1b[0m\r\n");
-    };
-
-    wsRef.current = ws;
-
-    // Forward keystrokes to backend
-    term.onData((data: string) => {
-      if (ws.readyState === WebSocket.OPEN) {
-        ws.send(new TextEncoder().encode(data));
-      }
-    });
-
-    // Handle resize
-    const handleResize = () => {
-      fitAddon.fit();
-      if (ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify({
+      ws.onopen = () => {
+        setConnected(true);
+        term.focus();
+        // Sync terminal size
+        ws!.send(JSON.stringify({
           type: "resize",
           cols: term.cols,
           rows: term.rows,
         }));
-      }
-    };
+      };
 
-    const resizeObserver = new ResizeObserver(handleResize);
-    resizeObserver.observe(termRef.current);
+      ws.onmessage = (event: MessageEvent) => {
+        if (event.data instanceof ArrayBuffer) {
+          term.write(new Uint8Array(event.data));
+        } else {
+          term.write(event.data);
+        }
+      };
+
+      ws.onclose = () => {
+        setConnected(false);
+        term.write("\r\n\x1b[31m[Disconnected]\x1b[0m\r\n");
+      };
+
+      ws.onerror = () => {
+        setConnected(false);
+      };
+
+      // Send keystrokes as binary
+      term.onData((data: string) => {
+        if (ws && ws.readyState === WebSocket.OPEN) {
+          const bytes = new TextEncoder().encode(data);
+          ws.send(bytes);
+        }
+      });
+
+      // Send binary sequences (Ctrl+C, arrow keys, etc.)
+      term.onBinary((data: string) => {
+        if (ws && ws.readyState === WebSocket.OPEN) {
+          const buffer = new Uint8Array(data.length);
+          for (let i = 0; i < data.length; i++) {
+            buffer[i] = data.charCodeAt(i);
+          }
+          ws.send(buffer);
+        }
+      });
+
+      // Resize handling
+      const doResize = () => {
+        if (!fitAddon || !term) return;
+        fitAddon.fit();
+        if (ws && ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({
+            type: "resize",
+            cols: term.cols,
+            rows: term.rows,
+          }));
+        }
+      };
+
+      resizeObserver = new ResizeObserver(doResize);
+      if (termRef.current) {
+        resizeObserver.observe(termRef.current);
+      }
+    })();
 
     return () => {
-      resizeObserver.disconnect();
-      ws.close();
-      term.dispose();
+      if (resizeObserver) resizeObserver.disconnect();
+      if (ws) ws.close();
+      if (term) term.dispose();
+      initialized.current = false;
     };
   }, []);
 
-  useEffect(() => {
-    const cleanup = connect();
-    return () => {
-      cleanup.then((fn) => fn?.());
-    };
-  }, [connect]);
-
   return (
-    <div className={`flex flex-col bg-[#09090b] rounded-xl border border-[#1c1c22] overflow-hidden ${className}`}>
-      {/* Terminal header */}
-      <div className="flex items-center justify-between px-4 py-2 bg-[#0f0f13] border-b border-[#1c1c22]">
+    <div className={`flex flex-col overflow-hidden ${className}`} style={{ backgroundColor: "#1a1b26" }}>
+      {/* macOS-style title bar */}
+      <div className="flex items-center justify-between px-4 py-1.5"
+        style={{ backgroundColor: "#16161e", borderBottom: "1px solid #292e42" }}>
         <div className="flex items-center gap-2">
           <div className="flex gap-1.5">
-            <div className={`w-3 h-3 rounded-full ${connected ? "bg-[#10b981]" : "bg-[#ef4444]"}`} />
-            <div className="w-3 h-3 rounded-full bg-[#f59e0b]" />
-            <div className="w-3 h-3 rounded-full bg-[#6b7280]" />
-          </div>
-          <span className="text-[#a1a1aa] text-xs font-mono ml-2">
-            {connected ? "Terminal — Connected" : "Terminal — Disconnected"}
-          </span>
-        </div>
-        <div className="flex items-center gap-2">
-          <span className="text-[#52525b] text-[10px]">
-            Type `claude` to start Claude Code
-          </span>
-          {onClose && (
             <button
               onClick={onClose}
-              className="text-[#52525b] hover:text-[#fafafa] transition-colors text-sm"
-            >
-              ✕
-            </button>
-          )}
+              className="w-3 h-3 rounded-full bg-[#ff5f57] hover:brightness-110 transition-all"
+              title="Close"
+            />
+            <div className="w-3 h-3 rounded-full bg-[#febc2e]" />
+            <div className="w-3 h-3 rounded-full bg-[#28c840]" />
+          </div>
+          <span className="text-[11px] font-mono ml-3" style={{ color: "#565f89" }}>
+            {connected ? "bash — /workspace" : "connecting..."}
+          </span>
         </div>
+        <span className="text-[10px]" style={{ color: "#414868" }}>
+          {connected ? "●" : "○"} {connected ? "PTY" : ""}
+        </span>
       </div>
 
-      {/* Terminal body */}
+      {/* Terminal body — fills all available space */}
       <div
         ref={termRef}
-        className="flex-1 min-h-[300px]"
-        style={{ padding: "4px" }}
+        className="flex-1"
+        style={{ padding: "8px 4px 4px 8px", minHeight: "400px" }}
       />
     </div>
   );
