@@ -225,6 +225,7 @@ export default function Terminal({
         ref={termRef}
         className="flex-1 overflow-hidden"
         style={{ padding: "8px 4px 4px 8px" }}
+        onContextMenu={(e) => e.preventDefault()}
       />
     </div>
   );
