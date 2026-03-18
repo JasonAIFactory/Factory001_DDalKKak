@@ -370,7 +370,7 @@ function SessionDetail({
       </div>
 
       {/* Tab content */}
-      <div className="flex-1 overflow-auto">
+      <div className="flex-1 overflow-hidden" style={{ minHeight: 0 }}>
         {tab === "terminal" && (
           <Terminal className="h-full rounded-none border-0" sessionId={session.id} />
         )}
