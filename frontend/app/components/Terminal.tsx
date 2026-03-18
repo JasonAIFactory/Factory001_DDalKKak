@@ -203,7 +203,7 @@ export default function Terminal({
   }, []);
 
   return (
-    <div className={`flex flex-col ${className}`} style={{ backgroundColor: "#1a1b26", height: "100%", minHeight: "500px" }}>
+    <div className={`flex flex-col ${className}`} style={{ backgroundColor: "#1a1b26", height: "100%", position: "absolute", inset: 0 }}>
       {/* macOS-style title bar */}
       <div className="flex-shrink-0 flex items-center justify-between px-4 py-1.5"
         style={{ backgroundColor: "#16161e", borderBottom: "1px solid #292e42" }}>
