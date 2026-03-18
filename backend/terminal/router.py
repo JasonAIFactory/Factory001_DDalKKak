@@ -1,19 +1,15 @@
 """WebSocket-based PTY terminal for web browser access.
 
-Spawns a real bash shell in the Docker container.
+Spawns a real bash shell in the Docker container via subprocess.
 Users can run `claude` (Claude Code CLI) with their own auth.
 """
 from __future__ import annotations
 
 import asyncio
-import fcntl
+import json
 import logging
 import os
-import pty
-import select
 import struct
-import termios
-from typing import Optional
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
@@ -21,82 +17,46 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-# Active terminal sessions: websocket_id -> TerminalSession
-_terminals: dict[str, "TerminalSession"] = {}
-
 
 class TerminalSession:
-    """Manages a PTY subprocess connected to a WebSocket."""
+    """Manages a subprocess shell connected to a WebSocket."""
 
-    def __init__(self, ws_id: str, cols: int = 120, rows: int = 30):
+    def __init__(self, ws_id: str):
         self.ws_id = ws_id
-        self.cols = cols
-        self.rows = rows
-        self.master_fd: Optional[int] = None
-        self.pid: Optional[int] = None
-        self._reader_task: Optional[asyncio.Task] = None
+        self.process: asyncio.subprocess.Process | None = None
+        self._reader_task: asyncio.Task | None = None
 
     async def start(self, websocket: WebSocket) -> None:
-        """Fork a PTY and start reading output."""
-        pid, fd = pty.openpty()
-        self.master_fd = fd
-        self.pid = pid
+        """Start a bash shell subprocess with pipes."""
+        env = os.environ.copy()
+        env["TERM"] = "xterm-256color"
+        env["SHELL"] = "/bin/bash"
+        env["COLUMNS"] = "120"
+        env["LINES"] = "30"
 
-        # Set initial terminal size
-        self._set_winsize(self.cols, self.rows)
+        self.process = await asyncio.create_subprocess_exec(
+            "/bin/bash", "--login", "-i",
+            stdin=asyncio.subprocess.PIPE,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.STDOUT,
+            env=env,
+        )
 
-        # Fork the actual shell process
-        child_pid = os.fork()
-        if child_pid == 0:
-            # Child process: become the PTY slave
-            os.close(fd)
-            os.setsid()
-
-            slave_fd = os.open(os.ttyname(pid), os.O_RDWR)
-            os.dup2(slave_fd, 0)
-            os.dup2(slave_fd, 1)
-            os.dup2(slave_fd, 2)
-            if slave_fd > 2:
-                os.close(slave_fd)
-
-            env = os.environ.copy()
-            env["TERM"] = "xterm-256color"
-            env["SHELL"] = "/bin/bash"
-
-            os.execvpe("/bin/bash", ["/bin/bash", "--login"], env)
-        else:
-            # Parent process: close slave side, keep master
-            os.close(pid)
-            self.pid = child_pid
-
-            # Make master fd non-blocking
-            flags = fcntl.fcntl(fd, fcntl.F_GETFL)
-            fcntl.fcntl(fd, fcntl.F_SETFL, flags | os.O_NONBLOCK)
-
-            # Start reading from PTY
-            self._reader_task = asyncio.create_task(
-                self._read_loop(websocket)
-            )
-            logger.info(
-                "Terminal started: ws=%s pid=%d", self.ws_id, child_pid
-            )
+        self._reader_task = asyncio.create_task(self._read_loop(websocket))
+        logger.info("Terminal started: ws=%s pid=%d", self.ws_id, self.process.pid)
 
     async def _read_loop(self, websocket: WebSocket) -> None:
-        """Read PTY output and send to WebSocket."""
-        loop = asyncio.get_event_loop()
+        """Read subprocess stdout and send to WebSocket."""
         try:
             while True:
-                await asyncio.sleep(0.01)
+                if not self.process or not self.process.stdout:
+                    break
+                data = await self.process.stdout.read(4096)
+                if not data:
+                    break
                 try:
-                    if self.master_fd is None:
-                        break
-                    r, _, _ = select.select([self.master_fd], [], [], 0)
-                    if r:
-                        data = os.read(self.master_fd, 4096)
-                        if not data:
-                            break
-                        await websocket.send_bytes(data)
-                except OSError:
+                    await websocket.send_bytes(data)
+                except Exception:
                     break
         except asyncio.CancelledError:
             pass
@@ -104,21 +64,10 @@ class TerminalSession:
             logger.error("Terminal read error: %s", e)
 
     async def write(self, data: bytes) -> None:
-        """Write input to PTY."""
-        if self.master_fd is not None:
-            os.write(self.master_fd, data)
-
-    def resize(self, cols: int, rows: int) -> None:
-        """Resize the PTY."""
-        self.cols = cols
-        self.rows = rows
-        self._set_winsize(cols, rows)
-
-    def _set_winsize(self, cols: int, rows: int) -> None:
-        """Set PTY window size."""
-        if self.master_fd is not None:
-            winsize = struct.pack("HHHH", rows, cols, 0, 0)
-            fcntl.ioctl(self.master_fd, termios.TIOCSWINSZ, winsize)
+        """Write input to subprocess stdin."""
+        if self.process and self.process.stdin:
+            self.process.stdin.write(data)
+            await self.process.stdin.drain()
 
     async def stop(self) -> None:
         """Kill the shell and cleanup."""
@@ -129,17 +78,11 @@ class TerminalSession:
             except asyncio.CancelledError:
                 pass
 
-        if self.pid:
+        if self.process:
             try:
-                os.kill(self.pid, 9)
-                os.waitpid(self.pid, 0)
-            except (OSError, ChildProcessError):
-                pass
-
-        if self.master_fd is not None:
-            try:
-                os.close(self.master_fd)
-            except OSError:
+                self.process.kill()
+                await self.process.wait()
+            except (OSError, ProcessLookupError):
                 pass
 
         logger.info("Terminal stopped: ws=%s", self.ws_id)
@@ -152,7 +95,6 @@ async def websocket_terminal(websocket: WebSocket):
     Protocol:
     - Binary frames: raw terminal input (keystrokes)
     - Text frames: JSON commands (resize, ping)
-      {"type": "resize", "cols": 120, "rows": 30}
     """
     await websocket.accept()
     ws_id = str(id(websocket))
@@ -160,32 +102,30 @@ async def websocket_terminal(websocket: WebSocket):
 
     try:
         await terminal.start(websocket)
-        _terminals[ws_id] = terminal
+
+        # Send welcome message
+        welcome = (
+            "\x1b[1;35m=== DalkkakAI Web Terminal ===\x1b[0m\r\n"
+            "\x1b[90mType 'claude' to start Claude Code with your account.\x1b[0m\r\n\r\n"
+        )
+        await websocket.send_bytes(welcome.encode())
 
         while True:
             msg = await websocket.receive()
 
-            if msg.get("bytes"):
+            if "bytes" in msg and msg["bytes"]:
                 await terminal.write(msg["bytes"])
-            elif msg.get("text"):
-                import json
+            elif "text" in msg and msg["text"]:
                 try:
                     cmd = json.loads(msg["text"])
-                    if cmd.get("type") == "resize":
-                        terminal.resize(
-                            cmd.get("cols", 120),
-                            cmd.get("rows", 30)
-                        )
-                    elif cmd.get("type") == "ping":
+                    if cmd.get("type") == "ping":
                         await websocket.send_text('{"type":"pong"}')
-                except json.JSONDecodeError:
-                    # Treat as raw text input
+                except (json.JSONDecodeError, KeyError):
                     await terminal.write(msg["text"].encode())
 
     except WebSocketDisconnect:
-        logger.info("Terminal WebSocket disconnected: %s", ws_id)
+        logger.info("Terminal disconnected: %s", ws_id)
     except Exception as e:
-        logger.error("Terminal WebSocket error: %s", e)
+        logger.error("Terminal error: %s", e)
     finally:
         await terminal.stop()
-        _terminals.pop(ws_id, None)
