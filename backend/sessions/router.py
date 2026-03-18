@@ -270,6 +270,77 @@ async def resume(
     return {"ok": True, "data": SessionResponse.model_validate(session).model_dump()}
 
 
+@router.post("/sessions/{session_id}/approve", response_model=dict)
+async def approve(
+    session_id: uuid.UUID,
+    startup_id: uuid.UUID = Query(...),
+    current_user: User = Depends(get_current_user),
+    db: DbSession = Depends(get_db),
+) -> dict:
+    """Approve a session in review status → marks as completed."""
+    await _get_startup_or_404(db, startup_id, current_user.id)
+    session = await _get_session_or_404(db, session_id, startup_id)
+
+    if session.status != "review":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Cannot approve session with status: {session.status}",
+        )
+
+    session.status = "completed"
+    session.progress = 100
+    await db.flush()
+
+    return {"ok": True, "data": SessionResponse.model_validate(session).model_dump()}
+
+
+@router.post("/sessions/{session_id}/retry", response_model=dict)
+async def retry(
+    session_id: uuid.UUID,
+    startup_id: uuid.UUID = Query(...),
+    current_user: User = Depends(get_current_user),
+    db: DbSession = Depends(get_db),
+) -> dict:
+    """Retry a failed or reviewed session → re-queue for executor."""
+    await _get_startup_or_404(db, startup_id, current_user.id)
+    session = await _get_session_or_404(db, session_id, startup_id)
+
+    if session.status not in ("error", "review"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Cannot retry session with status: {session.status}",
+        )
+
+    session.status = "queued"
+    session.error_message = None
+    session.progress = 0
+    await db.flush()
+
+    return {"ok": True, "data": SessionResponse.model_validate(session).model_dump()}
+
+
+@router.post("/sessions/{session_id}/cancel", response_model=dict)
+async def cancel_running(
+    session_id: uuid.UUID,
+    startup_id: uuid.UUID = Query(...),
+    current_user: User = Depends(get_current_user),
+    db: DbSession = Depends(get_db),
+) -> dict:
+    """Cancel a running/queued session → soft delete + cleanup."""
+    startup = await _get_startup_or_404(db, startup_id, current_user.id)
+    session = await _get_session_or_404(db, session_id, startup_id)
+
+    if session.status not in ("queued", "running", "paused"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Cannot cancel session with status: {session.status}",
+        )
+
+    await cancel_session(db, session, startup)
+
+    return {"ok": True}
+
+
 @router.post("/sessions/{session_id}/merge", response_model=dict)
 async def merge(
     session_id: uuid.UUID,

@@ -21,8 +21,10 @@ export default function Terminal({
   const [connected, setConnected] = useState(false);
 
   useEffect(() => {
+    console.log("[Terminal] mounting, ref:", !!termRef.current, "initialized:", initialized.current);
     if (!termRef.current || initialized.current) return;
     initialized.current = true;
+    console.log("[Terminal] initializing xterm + websocket");
 
     let ws: WebSocket | null = null;
     let term: any = null;
@@ -89,6 +91,7 @@ export default function Terminal({
       // WebSocket to backend PTY
       const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
       const wsUrl = apiUrl.replace(/^http/, "ws") + `/ws/terminal/${sessionId}`;
+      console.log("[Terminal] connecting to:", wsUrl);
       ws = new WebSocket(wsUrl);
       ws.binaryType = "arraybuffer";
 
