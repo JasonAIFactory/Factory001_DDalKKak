@@ -110,7 +110,7 @@ function SessionCard({
   }
 
   const progress = session.progress ?? 0;
-  const cost = session.total_cost ?? 0;
+  const cost = Number(session.total_cost ?? 0);
   const filesCount = Array.isArray(session.files_changed) ? session.files_changed.length : 0;
   const isTerminal = session.agent_type === "terminal";
 
@@ -273,7 +273,7 @@ function SessionDetail({
 
   const cfg = STATUS_CFG[session.status] ?? STATUS_CFG.queued;
   const progress = session.progress ?? 0;
-  const cost = session.total_cost ?? 0;
+  const cost = Number(session.total_cost ?? 0);
   const filesCount = Array.isArray(session.files_changed) ? session.files_changed.length : 0;
   const isTerminal = session.agent_type === "terminal";
 

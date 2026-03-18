@@ -201,7 +201,7 @@ export default function DashboardPage() {
                       <p className="text-xs text-gray-500">{session.agent_type}</p>
                     </div>
                     <span className="text-xs text-gray-500">
-                      ${(session.total_cost ?? 0).toFixed(4)}
+                      ${Number(session.total_cost ?? 0).toFixed(4)}
                     </span>
                   </div>
                 ))}
