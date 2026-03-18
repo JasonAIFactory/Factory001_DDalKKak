@@ -1,15 +1,21 @@
 """WebSocket-based PTY terminal for web browser access.
 
-Spawns a real bash shell in the Docker container via subprocess.
+Uses pty.openpty() + subprocess to create a real pseudo-terminal.
+This gives proper line discipline, job control, and interactive support.
 Users can run `claude` (Claude Code CLI) with their own auth.
 """
 from __future__ import annotations
 
 import asyncio
+import fcntl
 import json
 import logging
 import os
+import pty
+import signal
 import struct
+import subprocess
+import termios
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
@@ -19,55 +25,105 @@ router = APIRouter()
 
 
 class TerminalSession:
-    """Manages a subprocess shell connected to a WebSocket."""
+    """Manages a PTY subprocess connected to a WebSocket."""
 
     def __init__(self, ws_id: str):
         self.ws_id = ws_id
-        self.process: asyncio.subprocess.Process | None = None
+        self.master_fd: int | None = None
+        self.child_pid: int | None = None
         self._reader_task: asyncio.Task | None = None
 
-    async def start(self, websocket: WebSocket) -> None:
-        """Start a bash shell subprocess with pipes."""
+    async def start(self, websocket: WebSocket, cols: int = 120, rows: int = 30) -> None:
+        """Spawn bash in a real PTY."""
+        # Create PTY pair
+        master_fd, slave_fd = pty.openpty()
+
+        # Set terminal size on slave
+        winsize = struct.pack("HHHH", rows, cols, 0, 0)
+        fcntl.ioctl(slave_fd, termios.TIOCSWINSZ, winsize)
+
+        # Spawn bash with slave as its terminal
         env = os.environ.copy()
         env["TERM"] = "xterm-256color"
         env["SHELL"] = "/bin/bash"
-        env["COLUMNS"] = "120"
-        env["LINES"] = "30"
+        env["HOME"] = "/root"
 
-        self.process = await asyncio.create_subprocess_exec(
-            "/bin/bash", "--login", "-i",
-            stdin=asyncio.subprocess.PIPE,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.STDOUT,
+        child_pid = subprocess.Popen(
+            ["/bin/bash", "--login"],
+            stdin=slave_fd,
+            stdout=slave_fd,
+            stderr=slave_fd,
+            preexec_fn=os.setsid,
             env=env,
-        )
+            cwd="/workspace",
+        ).pid
+
+        # Parent keeps master, close slave
+        os.close(slave_fd)
+
+        self.master_fd = master_fd
+        self.child_pid = child_pid
+
+        # Make master non-blocking for async reads
+        flags = fcntl.fcntl(master_fd, fcntl.F_GETFL)
+        fcntl.fcntl(master_fd, fcntl.F_SETFL, flags | os.O_NONBLOCK)
 
         self._reader_task = asyncio.create_task(self._read_loop(websocket))
-        logger.info("Terminal started: ws=%s pid=%d", self.ws_id, self.process.pid)
+        logger.info("Terminal started: ws=%s pid=%d", self.ws_id, child_pid)
 
     async def _read_loop(self, websocket: WebSocket) -> None:
-        """Read subprocess stdout and send to WebSocket."""
+        """Read PTY output and send to WebSocket."""
+        loop = asyncio.get_event_loop()
         try:
             while True:
-                if not self.process or not self.process.stdout:
-                    break
-                data = await self.process.stdout.read(4096)
-                if not data:
-                    break
+                # Use loop.run_in_executor to avoid blocking
                 try:
-                    await websocket.send_bytes(data)
-                except Exception:
+                    data = await loop.run_in_executor(
+                        None, self._blocking_read
+                    )
+                    if data:
+                        await websocket.send_bytes(data)
+                    else:
+                        # Small sleep to prevent busy-loop when no data
+                        await asyncio.sleep(0.02)
+                except OSError:
                     break
+                except Exception as e:
+                    if "disconnect" in str(e).lower():
+                        break
+                    await asyncio.sleep(0.02)
         except asyncio.CancelledError:
             pass
-        except Exception as e:
-            logger.error("Terminal read error: %s", e)
+
+    def _blocking_read(self) -> bytes | None:
+        """Read from master fd (called in executor thread)."""
+        import select as sel
+        if self.master_fd is None:
+            return None
+        try:
+            r, _, _ = sel.select([self.master_fd], [], [], 0.1)
+            if r:
+                return os.read(self.master_fd, 4096)
+        except OSError:
+            raise
+        return None
 
     async def write(self, data: bytes) -> None:
-        """Write input to subprocess stdin."""
-        if self.process and self.process.stdin:
-            self.process.stdin.write(data)
-            await self.process.stdin.drain()
+        """Write input to PTY master."""
+        if self.master_fd is not None:
+            try:
+                os.write(self.master_fd, data)
+            except OSError as e:
+                logger.error("Write error: %s", e)
+
+    def resize(self, cols: int, rows: int) -> None:
+        """Resize the PTY."""
+        if self.master_fd is not None:
+            try:
+                winsize = struct.pack("HHHH", rows, cols, 0, 0)
+                fcntl.ioctl(self.master_fd, termios.TIOCSWINSZ, winsize)
+            except OSError:
+                pass
 
     async def stop(self) -> None:
         """Kill the shell and cleanup."""
@@ -78,12 +134,22 @@ class TerminalSession:
             except asyncio.CancelledError:
                 pass
 
-        if self.process:
+        if self.child_pid:
             try:
-                self.process.kill()
-                await self.process.wait()
+                os.killpg(os.getpgid(self.child_pid), signal.SIGTERM)
             except (OSError, ProcessLookupError):
                 pass
+            try:
+                os.waitpid(self.child_pid, os.WNOHANG)
+            except ChildProcessError:
+                pass
+
+        if self.master_fd is not None:
+            try:
+                os.close(self.master_fd)
+            except OSError:
+                pass
+            self.master_fd = None
 
         logger.info("Terminal stopped: ws=%s", self.ws_id)
 
@@ -103,13 +169,6 @@ async def websocket_terminal(websocket: WebSocket):
     try:
         await terminal.start(websocket)
 
-        # Send welcome message
-        welcome = (
-            "\x1b[1;35m=== DalkkakAI Web Terminal ===\x1b[0m\r\n"
-            "\x1b[90mType 'claude' to start Claude Code with your account.\x1b[0m\r\n\r\n"
-        )
-        await websocket.send_bytes(welcome.encode())
-
         while True:
             msg = await websocket.receive()
 
@@ -118,9 +177,15 @@ async def websocket_terminal(websocket: WebSocket):
             elif "text" in msg and msg["text"]:
                 try:
                     cmd = json.loads(msg["text"])
-                    if cmd.get("type") == "ping":
+                    if cmd.get("type") == "resize":
+                        terminal.resize(
+                            cmd.get("cols", 120),
+                            cmd.get("rows", 30),
+                        )
+                    elif cmd.get("type") == "ping":
                         await websocket.send_text('{"type":"pong"}')
                 except (json.JSONDecodeError, KeyError):
+                    # Raw text input
                     await terminal.write(msg["text"].encode())
 
     except WebSocketDisconnect:
