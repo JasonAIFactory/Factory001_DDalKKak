@@ -50,6 +50,7 @@ async def _get_next_queued_session(db: DbSession, user_id: str) -> Session | Non
         .where(
             Startup.user_id == user_id,
             Session.status == "queued",
+            Session.agent_type != "terminal",  # terminal sessions skip queue
             Session.deleted_at.is_(None),
         )
         .order_by(Session.priority.desc(), Session.queued_at.asc())

@@ -94,8 +94,14 @@ async def create(
         agent_type=body.agent_type,
         priority=body.priority,
     )
-    # Immediately queue it
-    await queue_session(db, session)
+
+    if body.agent_type == "terminal":
+        # Terminal sessions skip the queue — user controls via web terminal
+        session.status = "running"
+    else:
+        # AI sessions go through the queue → executor picks them up
+        await queue_session(db, session)
+
     await db.refresh(session)
 
     return {
