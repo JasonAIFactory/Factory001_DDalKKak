@@ -2,10 +2,23 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-# Install git (required for worktree-based session isolation)
-RUN apt-get update && apt-get install -y --no-install-recommends git && rm -rf /var/lib/apt/lists/*
+# Install system deps: git (worktrees), curl (health checks), Node.js (Claude Code CLI)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    git \
+    curl \
+    ca-certificates \
+    gnupg \
+    && mkdir -p /etc/apt/keyrings \
+    && curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key | gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg \
+    && echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_20.x nodistro main" > /etc/apt/sources.list.d/nodesource.list \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends nodejs \
+    && rm -rf /var/lib/apt/lists/*
 
-# Install dependencies first (layer caching — only re-runs when requirements change)
+# Install Claude Code CLI globally (users run `claude` in web terminal)
+RUN npm install -g @anthropic-ai/claude-code 2>/dev/null || echo "Claude Code CLI install skipped — may need manual install"
+
+# Install Python dependencies (layer caching — only re-runs when requirements change)
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
