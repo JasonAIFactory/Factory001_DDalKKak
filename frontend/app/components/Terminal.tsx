@@ -18,8 +18,10 @@ export default function Terminal({
 }) {
   const termRef = useRef<HTMLDivElement>(null);
   const wsRef = useRef<WebSocket | null>(null);
+  const xtermRef = useRef<any>(null);
   const initialized = useRef(false);
   const [connected, setConnected] = useState(false);
+  const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number } | null>(null);
 
   useEffect(() => {
     console.log("[Terminal] mounting, ref:", !!termRef.current, "initialized:", initialized.current);
@@ -83,6 +85,7 @@ export default function Terminal({
       term.loadAddon(new WebLinksAddon());
 
       term.open(termRef.current);
+      xtermRef.current = term;
 
       // Small delay to ensure DOM is ready for fit
       requestAnimationFrame(() => {
@@ -230,14 +233,81 @@ export default function Terminal({
         style={{ padding: "8px 4px 4px 8px" }}
         onContextMenu={(e) => {
           e.preventDefault();
-          // Right-click = paste (like iTerm2)
-          navigator.clipboard.readText().then((text) => {
-            if (text && wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-              wsRef.current.send(new TextEncoder().encode(text));
-            }
-          }).catch(() => {});
+          setCtxMenu({ x: e.clientX, y: e.clientY });
         }}
+        onClick={() => ctxMenu && setCtxMenu(null)}
       />
+
+      {/* Custom context menu */}
+      {ctxMenu && (
+        <>
+          <div className="fixed inset-0 z-40" onClick={() => setCtxMenu(null)} />
+          <div
+            className="fixed z-50 rounded-lg py-1 shadow-xl"
+            style={{
+              left: ctxMenu.x,
+              top: ctxMenu.y,
+              backgroundColor: "#1e1e2e",
+              border: "1px solid #313244",
+              minWidth: "160px",
+            }}
+          >
+            <CtxBtn
+              label="Copy"
+              shortcut="Ctrl+C"
+              onClick={() => {
+                const sel = xtermRef.current?.getSelection();
+                if (sel) navigator.clipboard.writeText(sel);
+                setCtxMenu(null);
+              }}
+            />
+            <CtxBtn
+              label="Paste"
+              shortcut="Ctrl+V"
+              onClick={() => {
+                navigator.clipboard.readText().then((text) => {
+                  if (text && wsRef.current?.readyState === WebSocket.OPEN) {
+                    wsRef.current.send(new TextEncoder().encode(text));
+                  }
+                });
+                setCtxMenu(null);
+              }}
+            />
+            <div className="my-1" style={{ borderTop: "1px solid #313244" }} />
+            <CtxBtn
+              label="Select All"
+              shortcut=""
+              onClick={() => {
+                xtermRef.current?.selectAll();
+                setCtxMenu(null);
+              }}
+            />
+            <CtxBtn
+              label="Clear Terminal"
+              shortcut=""
+              onClick={() => {
+                xtermRef.current?.clear();
+                setCtxMenu(null);
+              }}
+            />
+          </div>
+        </>
+      )}
     </div>
+  );
+}
+
+function CtxBtn({ label, shortcut, onClick }: { label: string; shortcut: string; onClick: () => void }) {
+  return (
+    <button
+      onClick={onClick}
+      className="w-full flex items-center justify-between px-3 py-1.5 text-sm transition-colors"
+      style={{ color: "#cdd6f4" }}
+      onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = "#313244")}
+      onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = "transparent")}
+    >
+      <span>{label}</span>
+      {shortcut && <span style={{ color: "#6c7086", fontSize: "11px" }}>{shortcut}</span>}
+    </button>
   );
 }
