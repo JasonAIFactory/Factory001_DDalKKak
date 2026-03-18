@@ -35,17 +35,17 @@ def _tmux_session_exists(name: str) -> bool:
     return result.returncode == 0
 
 
-def _create_tmux_session(name: str) -> None:
-    """Create a detached tmux session."""
+def _create_tmux_session(name: str, cwd: str = "/workspace") -> None:
+    """Create a detached tmux session in the given directory."""
     env = os.environ.copy()
     env["TERM"] = "xterm-256color"
     subprocess.run(
         ["tmux", "new-session", "-d", "-s", name, "-x", "120", "-y", "30"],
         capture_output=True,
         env=env,
-        cwd="/workspace",
+        cwd=cwd,
     )
-    logger.info("tmux session created: %s", name)
+    logger.info("tmux session created: %s (cwd=%s)", name, cwd)
 
 
 class TerminalSession:
@@ -179,7 +179,7 @@ async def websocket_terminal(websocket: WebSocket, session_id: str):
     """WebSocket terminal endpoint with tmux persistence.
 
     Each session_id gets its own tmux session:
-    - First connect: creates tmux session + attaches
+    - First connect: creates tmux session in startup's repo dir
     - Reconnect: re-attaches to existing session (Claude Code still running)
     - Disconnect: detaches only (tmux session stays alive)
     """
@@ -187,9 +187,31 @@ async def websocket_terminal(websocket: WebSocket, session_id: str):
 
     session_name = f"dalkkak-{session_id[:8]}"
 
+    # Resolve working directory: startup repo path
+    # session_id "main" = standalone terminal at /workspace
+    cwd = "/workspace"
+    if session_id != "main":
+        # Look up session → startup_id → repo path
+        try:
+            from backend.database import AsyncSessionLocal
+            from backend.models.session import Session
+            from sqlalchemy import select
+
+            async with AsyncSessionLocal() as db:
+                result = await db.execute(
+                    select(Session.startup_id).where(Session.id == session_id)
+                )
+                startup_id = result.scalar_one_or_none()
+                if startup_id:
+                    repo_path = f"/workspace/{startup_id}"
+                    if os.path.isdir(repo_path):
+                        cwd = repo_path
+        except Exception as e:
+            logger.warning("Could not resolve session repo path: %s", e)
+
     # Create tmux session if it doesn't exist
     if not _tmux_session_exists(session_name):
-        _create_tmux_session(session_name)
+        _create_tmux_session(session_name, cwd=cwd)
 
     terminal = TerminalSession(session_name)
 
