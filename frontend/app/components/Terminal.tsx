@@ -17,6 +17,7 @@ export default function Terminal({
   onClose?: () => void;
 }) {
   const termRef = useRef<HTMLDivElement>(null);
+  const wsRef = useRef<WebSocket | null>(null);
   const initialized = useRef(false);
   const [connected, setConnected] = useState(false);
 
@@ -94,6 +95,7 @@ export default function Terminal({
       console.log("[Terminal] connecting to:", wsUrl);
       ws = new WebSocket(wsUrl);
       ws.binaryType = "arraybuffer";
+      wsRef.current = ws;
 
       ws.onopen = () => {
         setConnected(true);
@@ -190,8 +192,9 @@ export default function Terminal({
 
     return () => {
       if (resizeObserver) resizeObserver.disconnect();
-      if (ws) ws.close();
+      if (ws && ws.readyState === WebSocket.OPEN) ws.close();
       if (term) term.dispose();
+      wsRef.current = null;
       initialized.current = false;
     };
   }, []);
@@ -225,7 +228,15 @@ export default function Terminal({
         ref={termRef}
         className="flex-1 overflow-hidden"
         style={{ padding: "8px 4px 4px 8px" }}
-        onContextMenu={(e) => e.preventDefault()}
+        onContextMenu={(e) => {
+          e.preventDefault();
+          // Right-click = paste (like iTerm2)
+          navigator.clipboard.readText().then((text) => {
+            if (text && wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+              wsRef.current.send(new TextEncoder().encode(text));
+            }
+          }).catch(() => {});
+        }}
       />
     </div>
   );
