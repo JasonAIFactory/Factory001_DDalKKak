@@ -363,6 +363,62 @@ async def merge(
     return {"ok": True, "data": result}
 
 
+# ── File content ─────────────────────────────────────────────────────────────
+
+@router.get("/sessions/{session_id}/files/{file_path:path}", response_model=dict)
+async def get_file_content(
+    session_id: uuid.UUID,
+    file_path: str,
+    startup_id: uuid.UUID = Query(...),
+    current_user: User = Depends(get_current_user),
+    db: DbSession = Depends(get_db),
+) -> dict:
+    """Read a file from the session's worktree."""
+    import os
+
+    await _get_startup_or_404(db, startup_id, current_user.id)
+    session = await _get_session_or_404(db, session_id, startup_id)
+
+    # Determine file location
+    if session.worktree_path:
+        full_path = os.path.join(session.worktree_path, file_path)
+    else:
+        workspace = os.environ.get("WORKSPACE_PATH", "/workspace")
+        full_path = os.path.join(workspace, str(startup_id), file_path)
+
+    # Security: prevent path traversal
+    real_path = os.path.realpath(full_path)
+    workspace_root = os.path.realpath(os.environ.get("WORKSPACE_PATH", "/workspace"))
+    if not real_path.startswith(workspace_root):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Access denied: path outside workspace",
+        )
+
+    if not os.path.isfile(real_path):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"File not found: {file_path}",
+        )
+
+    try:
+        with open(real_path, "r", encoding="utf-8", errors="replace") as f:
+            content = f.read(500_000)  # 500KB limit
+    except OSError as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to read file: {e}",
+        ) from e
+
+    return {
+        "ok": True,
+        "data": {
+            "path": file_path,
+            "content": content,
+        },
+    }
+
+
 # ── Chat ──────────────────────────────────────────────────────────────────────
 
 @router.post("/sessions/{session_id}/chat", response_model=dict)

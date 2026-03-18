@@ -427,18 +427,7 @@ function SessionDetail({
         )}
 
         {tab === "files" && (
-          <div className="p-6 space-y-2">
-            {!Array.isArray(session.files_changed) || session.files_changed.length === 0 ? (
-              <p className="text-sm italic" style={{ color: C.textMuted }}>No files changed yet.</p>
-            ) : session.files_changed.map((f: string) => (
-              <div key={f} className="flex items-center gap-3 px-4 py-2.5 rounded-lg" style={{ backgroundColor: C.bgSecondary, border: `1px solid ${C.bgTertiary}` }}>
-                <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded" style={{ backgroundColor: `${C.green}22`, color: C.green }}>
-                  added
-                </span>
-                <span className="text-sm font-mono" style={{ color: C.textSecondary }}>{f}</span>
-              </div>
-            ))}
-          </div>
+          <FilesViewer session={session} startupId={startupId} />
         )}
 
         {tab === "tests" && (
@@ -466,6 +455,117 @@ function SessionDetail({
             ) : (
               <p className="text-sm italic" style={{ color: C.textMuted }}>No errors.</p>
             )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ── Files Viewer (split: file list + code content) ──────────────────────────
+function FilesViewer({ session, startupId }: { session: Session; startupId: string }) {
+  const [selectedFile, setSelectedFile] = useState<string | null>(null);
+  const [fileContent, setFileContent] = useState<string>("");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const files = Array.isArray(session.files_changed) ? session.files_changed : [];
+
+  async function loadFile(path: string) {
+    setSelectedFile(path);
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await fetch(
+        `${API_BASE}/api/sessions/${session.id}/files/${encodeURIComponent(path)}?startup_id=${startupId}`,
+        { headers: { Authorization: `Bearer ${getToken()}` } },
+      );
+      const json = await res.json();
+      if (json.ok) {
+        setFileContent(json.data.content);
+      } else {
+        setError(json.error || "Failed to load file");
+        setFileContent("");
+      }
+    } catch {
+      setError("Network error");
+      setFileContent("");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  if (files.length === 0) {
+    return (
+      <div className="p-6">
+        <p className="text-sm italic" style={{ color: C.textMuted }}>No files changed yet.</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex h-full">
+      {/* Left: file list */}
+      <div className="w-64 flex-shrink-0 overflow-auto" style={{ borderRight: `1px solid ${C.bgTertiary}` }}>
+        <div className="p-3">
+          <p className="text-[10px] font-semibold uppercase tracking-wider mb-2" style={{ color: C.textMuted }}>
+            {files.length} files changed
+          </p>
+          {files.map((f: string) => (
+            <button
+              key={f}
+              onClick={() => loadFile(f)}
+              className="w-full text-left flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-mono transition-all mb-1"
+              style={{
+                backgroundColor: selectedFile === f ? `${C.accentPurple}15` : "transparent",
+                color: selectedFile === f ? C.accentPurple : C.textSecondary,
+                border: selectedFile === f ? `1px solid ${C.accentPurple}33` : "1px solid transparent",
+              }}
+            >
+              <FileCode className="w-3 h-3 flex-shrink-0" />
+              <span className="truncate">{f}</span>
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Right: code viewer */}
+      <div className="flex-1 overflow-auto">
+        {!selectedFile ? (
+          <div className="flex items-center justify-center h-full">
+            <p className="text-sm" style={{ color: C.textMuted }}>Select a file to view its content</p>
+          </div>
+        ) : loading ? (
+          <div className="flex items-center justify-center h-full">
+            <Loader2 className="w-5 h-5 animate-spin" style={{ color: C.accentPurple }} />
+          </div>
+        ) : error ? (
+          <div className="p-6">
+            <div className="rounded-lg p-4" style={{ backgroundColor: `${C.red}11`, border: `1px solid ${C.red}33` }}>
+              <p className="text-sm" style={{ color: C.red }}>{error}</p>
+            </div>
+          </div>
+        ) : (
+          <div>
+            {/* File header */}
+            <div className="sticky top-0 px-4 py-2 flex items-center gap-2" style={{ backgroundColor: C.bgSecondary, borderBottom: `1px solid ${C.bgTertiary}` }}>
+              <FileCode className="w-3.5 h-3.5" style={{ color: C.accentPurple }} />
+              <span className="text-xs font-mono" style={{ color: C.textSecondary }}>{selectedFile}</span>
+              <span className="text-[10px] px-1.5 py-0.5 rounded ml-auto" style={{ backgroundColor: `${C.green}22`, color: C.green }}>
+                {fileContent.split("\n").length} lines
+              </span>
+            </div>
+            {/* Code content with line numbers */}
+            <pre className="p-4 text-[13px] leading-6 overflow-x-auto" style={{ color: C.textSecondary, fontFamily: "'JetBrains Mono', 'Fira Code', monospace" }}>
+              {fileContent.split("\n").map((line, i) => (
+                <div key={i} className="flex hover:brightness-125 transition-all">
+                  <span className="w-10 text-right pr-4 select-none flex-shrink-0" style={{ color: C.textMuted }}>
+                    {i + 1}
+                  </span>
+                  <span className="flex-1 whitespace-pre">{line}</span>
+                </div>
+              ))}
+            </pre>
           </div>
         )}
       </div>
