@@ -419,6 +419,50 @@ async def get_file_content(
     }
 
 
+@router.get("/sessions/{session_id}/file-tree", response_model=dict)
+async def get_file_tree(
+    session_id: uuid.UUID,
+    startup_id: uuid.UUID = Query(...),
+    current_user: User = Depends(get_current_user),
+    db: DbSession = Depends(get_db),
+) -> dict:
+    """List all files in the session's worktree as a flat list."""
+    import os
+
+    await _get_startup_or_404(db, startup_id, current_user.id)
+    session = await _get_session_or_404(db, session_id, startup_id)
+
+    # Determine root path
+    if session.worktree_path:
+        root = session.worktree_path
+    else:
+        workspace = os.environ.get("WORKSPACE_PATH", "/workspace")
+        root = os.path.join(workspace, str(startup_id))
+
+    real_root = os.path.realpath(root)
+    if not os.path.isdir(real_root):
+        return {"ok": True, "data": []}
+
+    files = []
+    skip_dirs = {".git", "node_modules", "__pycache__", ".venv", "venv", "worktrees", ".next"}
+    for dirpath, dirnames, filenames in os.walk(real_root):
+        # Skip hidden/large dirs
+        dirnames[:] = [d for d in dirnames if d not in skip_dirs and not d.startswith(".")]
+        for fname in filenames:
+            full = os.path.join(dirpath, fname)
+            rel = os.path.relpath(full, real_root).replace("\\", "/")
+            try:
+                size = os.path.getsize(full)
+            except OSError:
+                size = 0
+            if size > 1_000_000:  # skip files > 1MB
+                continue
+            files.append({"path": rel, "size": size})
+
+    files.sort(key=lambda f: f["path"])
+    return {"ok": True, "data": files}
+
+
 # ── Chat ──────────────────────────────────────────────────────────────────────
 
 @router.post("/sessions/{session_id}/chat", response_model=dict)
