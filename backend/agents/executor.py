@@ -153,6 +153,36 @@ class AgentExecutor:
         self.files_modified: list[str] = []
         self.start_time = time.time()
 
+    async def _load_conversation(self) -> list[dict]:
+        """Load existing conversation from DB for chat follow-ups."""
+        try:
+            from backend.database import AsyncSessionLocal
+            from backend.models.session import SessionMessage
+            from sqlalchemy import select as sa_select
+
+            async with AsyncSessionLocal() as db:
+                result = await db.execute(
+                    sa_select(SessionMessage)
+                    .where(SessionMessage.session_id == self.session_id)
+                    .order_by(SessionMessage.created_at.asc())
+                )
+                messages = result.scalars().all()
+
+                if not messages:
+                    return []
+
+                conversation = []
+                for msg in messages:
+                    if msg.role in ("user", "assistant"):
+                        conversation.append({
+                            "role": msg.role,
+                            "content": msg.content,
+                        })
+                return conversation
+        except Exception as e:
+            logger.warning("Could not load conversation: %s", e)
+            return []
+
     async def run(self) -> ExecutionResult:
         """
         Main execution loop. Runs until session_complete or a safety limit.
@@ -168,10 +198,13 @@ class AgentExecutor:
         # Initial progress broadcast
         await broadcast_progress(self.startup_id, self.session_id, 0, "Starting agent...")
 
-        # Seed the conversation with the user's session description
-        self.conversation = [
-            {"role": "user", "content": self.description}
-        ]
+        # Load existing conversation from DB (for chat follow-ups)
+        self.conversation = await self._load_conversation()
+        if not self.conversation:
+            # Fresh session — start with description
+            self.conversation = [
+                {"role": "user", "content": self.description}
+            ]
 
         for iteration in range(MAX_ITERATIONS):
             # ── Safety checks ────────────────────────────────────────

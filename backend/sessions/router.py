@@ -538,11 +538,27 @@ async def chat(
     Send a message to the agent during a session.
     Message is added to conversation history — agent picks it up on next iteration.
     """
-    await _get_startup_or_404(db, startup_id, current_user.id)
-    await _get_session_or_404(db, session_id, startup_id)
+    startup = await _get_startup_or_404(db, startup_id, current_user.id)
+    session = await _get_session_or_404(db, session_id, startup_id)
 
     message = await add_message(db, session_id, role="user", content=body.content)
-    # TODO: Notify agent via WebSocket to pick up the new instruction
+
+    # Re-run executor with the new message (background task)
+    if session.agent_type != "terminal":
+        import asyncio
+        from backend.sessions.queue import _dispatch_session, _get_user_api_key
+
+        # Update session description to include the new instruction
+        session.description = body.content
+        session.status = "running"
+        session.progress = 0
+        await db.commit()
+
+        user_api_key = await _get_user_api_key(db, current_user.id)
+
+        asyncio.create_task(
+            _dispatch_session(session, startup, user_api_key)
+        )
 
     return {
         "ok": True,
