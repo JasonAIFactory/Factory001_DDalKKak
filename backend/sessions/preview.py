@@ -288,12 +288,20 @@ def _build_docker_command(
         container_port = 3000
         image = "node:20-slim"
 
+    # Convert container path (/workspace/...) to host path for Docker volume mount
+    import os
+    host_workspace = os.environ.get("HOST_WORKSPACE_PATH", worktree_path)
+    if worktree_path.startswith("/workspace/"):
+        host_path = worktree_path.replace("/workspace/", f"{host_workspace}/", 1)
+    else:
+        host_path = worktree_path
+
     return [
         "docker", "run",
         "--detach",
         "--name", container_name,
         "--publish", f"{preview_port}:{container_port}",
-        "--volume", f"{worktree_path}:/app",
+        "--volume", f"{host_path}:/app",
         "--workdir", "/app",
         "--env", f"DATABASE_URL={preview_db_url}",
         "--env", "ENVIRONMENT=preview",
