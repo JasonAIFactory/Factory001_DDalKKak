@@ -1,0 +1,7 @@
+workspace/
+frontend/node_modules/
+frontend/.next/
+node_modules/
+.git/
+logs/
+*.md
