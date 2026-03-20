@@ -50,7 +50,7 @@ services:
       GOOGLE_AI_API_KEY: ${GOOGLE_AI_API_KEY:-placeholder}
       ENVIRONMENT: development
       CORS_ORIGINS: http://localhost:3000,http://localhost:3001
-      HOST_WORKSPACE_PATH: ./workspace
+      HOST_PROJECT_ROOT: c:/Sources/Factory001_DDalKKak
     ports:
       - "8000:8000"
     depends_on:

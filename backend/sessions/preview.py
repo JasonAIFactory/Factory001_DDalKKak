@@ -289,10 +289,12 @@ def _build_docker_command(
         image = "node:20-slim"
 
     # Convert container path (/workspace/...) to host path for Docker volume mount
+    # HOST_PROJECT_ROOT must be the absolute host path to the project root
     import os
-    host_workspace = os.environ.get("HOST_WORKSPACE_PATH", worktree_path)
-    if worktree_path.startswith("/workspace/"):
-        host_path = worktree_path.replace("/workspace/", f"{host_workspace}/", 1)
+    host_root = os.environ.get("HOST_PROJECT_ROOT", "")
+    if host_root and worktree_path.startswith("/workspace/"):
+        relative = worktree_path[len("/workspace/"):]
+        host_path = f"{host_root}/workspace/{relative}"
     else:
         host_path = worktree_path
 

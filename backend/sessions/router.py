@@ -372,7 +372,8 @@ async def launch_preview_endpoint(
     current_user: User = Depends(get_current_user),
     db: DbSession = Depends(get_db),
 ) -> dict:
-    """Launch a preview environment for this session's code."""
+    """Launch a preview environment for this session's code. Returns immediately."""
+    import asyncio
     import os
 
     startup = await _get_startup_or_404(db, startup_id, current_user.id)
@@ -383,24 +384,28 @@ async def launch_preview_endpoint(
         workspace, str(startup_id), "worktrees", session.branch_name or ""
     )
 
-    from backend.sessions.preview import launch_preview
-    result = await launch_preview(
-        worktree_path=worktree,
-        startup_id=str(startup_id),
-        session_id=str(session_id),
-    )
+    # Launch in background — don't block the API response
+    async def _launch_bg():
+        from backend.sessions.preview import launch_preview
+        result = await launch_preview(
+            worktree_path=worktree,
+            startup_id=str(startup_id),
+            session_id=str(session_id),
+        )
+        if result.success and result.url:
+            from backend.database import AsyncSessionLocal
+            from sqlalchemy import update as sa_update
+            async with AsyncSessionLocal() as bg_db:
+                await bg_db.execute(
+                    sa_update(Session).where(Session.id == session_id).values(preview_url=result.url)
+                )
+                await bg_db.commit()
 
-    if result.success and result.url:
-        session.preview_url = result.url
-        await db.flush()
+    asyncio.create_task(_launch_bg())
 
     return {
-        "ok": result.success,
-        "data": {
-            "url": result.url,
-            "port": result.port,
-            "error": result.error,
-        },
+        "ok": True,
+        "data": {"message": "Preview launching... URL will appear shortly."},
     }
 
 
