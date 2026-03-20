@@ -26,7 +26,7 @@ from pathlib import Path
 logger = logging.getLogger(__name__)
 
 # How long to wait for a preview container to become healthy
-PREVIEW_STARTUP_TIMEOUT = 60  # seconds
+PREVIEW_STARTUP_TIMEOUT = 15  # seconds
 
 # Track running previews: session_id → container_name
 _running_previews: dict[str, str] = {}
@@ -224,7 +224,7 @@ async def launch_preview(
 
     # Wait for the container to respond
     preview_url = f"http://localhost:{preview_port}"
-    health_url = f"{preview_url}/health"
+    health_url = f"{preview_url}/"
 
     await broadcast_test_output(
         startup_id, session_id,
@@ -280,11 +280,11 @@ def _build_docker_command(
         container_port = 8000
         image = "python:3.11-slim"
     elif app_type == "nextjs":
-        start_cmd = "npm install --silent && npm start"
+        start_cmd = "node src/index.js || npm start"
         container_port = 3000
         image = "node:20-slim"
     else:  # fullstack or generic node
-        start_cmd = "npm install --silent && npm start"
+        start_cmd = "node src/index.js || npm start"
         container_port = 3000
         image = "node:20-slim"
 
