@@ -363,6 +363,67 @@ async def merge(
     return {"ok": True, "data": result}
 
 
+# ── Preview ──────────────────────────────────────────────────────────────────
+
+@router.post("/sessions/{session_id}/preview", response_model=dict)
+async def launch_preview_endpoint(
+    session_id: uuid.UUID,
+    startup_id: uuid.UUID = Query(...),
+    current_user: User = Depends(get_current_user),
+    db: DbSession = Depends(get_db),
+) -> dict:
+    """Launch a preview environment for this session's code."""
+    import os
+
+    startup = await _get_startup_or_404(db, startup_id, current_user.id)
+    session = await _get_session_or_404(db, session_id, startup_id)
+
+    workspace = os.environ.get("WORKSPACE_PATH", "/workspace")
+    worktree = session.worktree_path or os.path.join(
+        workspace, str(startup_id), "worktrees", session.branch_name or ""
+    )
+
+    from backend.sessions.preview import launch_preview
+    result = await launch_preview(
+        worktree_path=worktree,
+        startup_id=str(startup_id),
+        session_id=str(session_id),
+    )
+
+    if result.success and result.url:
+        session.preview_url = result.url
+        await db.flush()
+
+    return {
+        "ok": result.success,
+        "data": {
+            "url": result.url,
+            "port": result.port,
+            "error": result.error,
+        },
+    }
+
+
+@router.post("/sessions/{session_id}/stop-preview", response_model=dict)
+async def stop_preview_endpoint(
+    session_id: uuid.UUID,
+    startup_id: uuid.UUID = Query(...),
+    current_user: User = Depends(get_current_user),
+    db: DbSession = Depends(get_db),
+) -> dict:
+    """Stop a running preview environment."""
+    await _get_startup_or_404(db, startup_id, current_user.id)
+    session = await _get_session_or_404(db, session_id, startup_id)
+
+    from backend.sessions.preview import stop_preview
+    await stop_preview(str(session_id))
+
+    session.preview_url = None
+    await db.flush()
+
+    return {"ok": True}
+
+
 # ── File content ─────────────────────────────────────────────────────────────
 
 @router.get("/sessions/{session_id}/files/{file_path:path}", response_model=dict)

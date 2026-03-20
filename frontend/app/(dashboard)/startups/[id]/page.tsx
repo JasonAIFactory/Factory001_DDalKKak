@@ -193,6 +193,17 @@ function SessionCard({
         {session.status === "completed" && (
           <Btn icon={<GitMerge className="w-3 h-3" />} label="Merge" color={C.accentPurple} onClick={() => doAction("merge")} disabled={acting} />
         )}
+        {["review", "completed", "running"].includes(session.status) && !session.preview_url && (
+          <Btn icon={<Play className="w-3 h-3" />} label="Preview" color={C.accentCyan} onClick={() => doAction("preview")} disabled={acting} />
+        )}
+        {session.preview_url && (
+          <a href={session.preview_url} target="_blank" rel="noopener noreferrer"
+            onClick={(e) => e.stopPropagation()}
+            className="flex items-center gap-1 text-[11px] font-medium px-2.5 py-1.5 rounded-md transition-all"
+            style={{ backgroundColor: `${C.green}22`, color: C.green }}>
+            <Eye className="w-3 h-3" /> Live
+          </a>
+        )}
         <button
           onClick={onOpen}
           className="flex items-center gap-1 text-[11px] px-2 py-1 rounded-md transition-colors ml-auto"
@@ -333,6 +344,16 @@ function SessionDetail({
           )}
           {session.status === "completed" && (
             <Btn icon={<GitMerge className="w-3 h-3" />} label="Merge & Deploy" color={C.accentPurple} onClick={() => doAction("merge")} disabled={acting} />
+          )}
+          {["review", "completed", "running"].includes(session.status) && !session.preview_url && (
+            <Btn icon={<Play className="w-3 h-3" />} label="Launch Preview" color={C.accentCyan} onClick={() => doAction("preview")} disabled={acting} />
+          )}
+          {session.preview_url && (
+            <a href={session.preview_url} target="_blank" rel="noopener noreferrer"
+              className="flex items-center gap-1 text-[11px] font-medium px-2.5 py-1.5 rounded-md transition-all"
+              style={{ backgroundColor: `${C.green}22`, color: C.green }}>
+              <Eye className="w-3 h-3" /> Open Preview
+            </a>
           )}
         </div>
       </div>
