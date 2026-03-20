@@ -100,15 +100,18 @@ async def create_session(
     db.add(session)
     await db.flush()
 
-    # Terminal sessions skip worktree — user works in shared /workspace
-    # Auto AI sessions need isolated worktree for parallel file writes
-    if agent_type != "terminal":
-        result = await create_worktree(
-            repo_path=_get_local_repo_path(startup),
-            branch=branch,
-        )
-        if result.success:
-            session.worktree_path = result.path
+    # All sessions get their own worktree for isolation + merging
+    result = await create_worktree(
+        repo_path=_get_local_repo_path(startup),
+        branch=branch,
+    )
+    if result.success:
+        session.worktree_path = result.path
+
+    # Terminal sessions start as 'running' (user controls manually)
+    # Auto AI sessions stay 'created' → queue picks them up
+    if agent_type == "terminal":
+        session.status = "running"
 
     return session
 

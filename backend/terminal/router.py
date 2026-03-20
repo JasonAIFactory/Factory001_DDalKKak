@@ -199,13 +199,17 @@ async def websocket_terminal(websocket: WebSocket, session_id: str):
 
             async with AsyncSessionLocal() as db:
                 result = await db.execute(
-                    select(Session.startup_id).where(Session.id == session_id)
+                    select(Session).where(Session.id == session_id)
                 )
-                startup_id = result.scalar_one_or_none()
-                if startup_id:
-                    repo_path = f"/workspace/{startup_id}"
-                    if os.path.isdir(repo_path):
-                        cwd = repo_path
+                session_obj = result.scalar_one_or_none()
+                if session_obj:
+                    # Use worktree path if available, else main repo
+                    if session_obj.worktree_path and os.path.isdir(session_obj.worktree_path):
+                        cwd = session_obj.worktree_path
+                    else:
+                        repo_path = f"/workspace/{session_obj.startup_id}"
+                        if os.path.isdir(repo_path):
+                            cwd = repo_path
         except Exception as e:
             logger.warning("Could not resolve session repo path: %s", e)
 
