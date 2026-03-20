@@ -77,6 +77,11 @@ class Session(Base, TimestampMixin):
     total_tokens_out: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     model_calls: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 
+    # Preview
+    preview_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    summary: Mapped[str | None] = mapped_column(Text, nullable=True)
+
     # Timing
     queued_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
