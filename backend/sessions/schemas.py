@@ -57,6 +57,9 @@ class SessionResponse(BaseModel):
     test_results: dict
     total_cost: Decimal
     model_calls: int
+    preview_url: str | None = None
+    error_message: str | None = None
+    summary: str | None = None
     queued_at: datetime | None
     started_at: datetime | None
     completed_at: datetime | None
