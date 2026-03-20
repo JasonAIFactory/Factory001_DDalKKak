@@ -394,10 +394,11 @@ async def launch_preview_endpoint(
         )
         if result.success and result.url:
             from backend.database import AsyncSessionLocal
+            from backend.models.session import Session as SessionModel
             from sqlalchemy import update as sa_update
             async with AsyncSessionLocal() as bg_db:
                 await bg_db.execute(
-                    sa_update(Session).where(Session.id == session_id).values(preview_url=result.url)
+                    sa_update(SessionModel).where(SessionModel.id == session_id).values(preview_url=result.url)
                 )
                 await bg_db.commit()
 
