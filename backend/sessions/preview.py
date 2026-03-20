@@ -222,36 +222,10 @@ async def launch_preview(
     # Track it so we can clean up later
     _running_previews[session_id] = container_name
 
-    # Wait for the container to respond
     preview_url = f"http://localhost:{preview_port}"
-    health_url = f"{preview_url}/"
 
-    await broadcast_test_output(
-        startup_id, session_id,
-        event="test.preview",
-        data={"message": f"Waiting for preview to start on port {preview_port}..."},
-    )
-
-    is_healthy = await _wait_until_healthy(health_url)
-
-    if not is_healthy:
-        # Still return the URL — container might just be slow or have no /health
-        logger.warning("Preview health check timed out: session=%s port=%d", session_id, preview_port)
-
-    # Broadcast the clickable URL to the UI
-    await broadcast_test_output(
-        startup_id, session_id,
-        event="test.preview",
-        data={
-            "url": preview_url,
-            "port": preview_port,
-            "app_type": app_type,
-            "container": container_name,
-            "ready": is_healthy,
-            "message": f"Preview ready at {preview_url}" if is_healthy else f"Preview starting at {preview_url}",
-        },
-    )
-
+    # Return immediately — don't wait for health check
+    # User clicks the link, browser retries naturally if app is still starting
     logger.info("Preview launched: session=%s url=%s", session_id, preview_url)
     return PreviewResult(
         success=True,

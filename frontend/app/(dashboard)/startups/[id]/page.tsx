@@ -107,10 +107,10 @@ function SessionCard({
       });
       if (path === "preview") {
         const json = await res.json();
-        if (json.ok) {
-          alert("Test environment launching! Check session detail for the link.");
+        if (json.ok && json.data?.url) {
+          window.open(json.data.url, "_blank");
         } else {
-          alert("Failed: " + (json.error || JSON.stringify(json)));
+          alert("Failed: " + (json.data?.error || json.error || "Unknown error"));
         }
       }
       onAction();
@@ -278,22 +278,18 @@ function SessionDetail({
         headers: { Authorization: `Bearer ${getToken()}`, "Content-Type": "application/json" },
       });
       if (path === "preview") {
-        // Poll for preview_url
-        const poll = setInterval(async () => {
-          onAction();
-          const updated = await fetch(`${API_BASE}/api/startups/${startupId}/sessions`, {
-            headers: { Authorization: `Bearer ${getToken()}` },
-          }).then(r => r.json());
-          const sess = updated.data?.find((s: Session) => s.id === session.id);
-          if (sess?.preview_url) {
-            setPreviewStatus(null);
-            clearInterval(poll);
-            window.open(sess.preview_url, "_blank");
-          }
-        }, 3000);
-        setTimeout(() => { clearInterval(poll); setPreviewStatus(null); }, 60000);
+        const json = await res.json();
+        setPreviewStatus(null);
+        if (json.ok && json.data?.url) {
+          window.open(json.data.url, "_blank");
+        } else {
+          alert("Failed: " + (json.data?.error || json.error || "Unknown error"));
+        }
       }
       onAction();
+    } catch (err) {
+      setPreviewStatus(null);
+      alert("Error: " + err);
     } finally { setActing(false); }
   }
 
