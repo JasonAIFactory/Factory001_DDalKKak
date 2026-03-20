@@ -178,6 +178,16 @@ function SessionCard({
         {session.model_calls > 0 && <span>{session.model_calls} calls</span>}
       </div>
 
+      {/* Terminal connection status */}
+      {isTerminal && (
+        <div className="flex items-center gap-1.5">
+          <span className="w-2 h-2 rounded-full animate-pulse" style={{ backgroundColor: session.status === "running" ? C.green : C.textMuted }} />
+          <span className="text-[10px]" style={{ color: C.textMuted }}>
+            {session.status === "running" ? "Terminal active" : "Terminal idle"}
+          </span>
+        </div>
+      )}
+
       {/* Latest action / error */}
       {session.error_message && session.status === "error" && (
         <p className="text-[11px] truncate" style={{ color: C.red }}>{session.error_message}</p>

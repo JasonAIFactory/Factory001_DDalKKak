@@ -25,6 +25,21 @@ router = APIRouter()
 # Track active tmux sessions: session_name -> child_pid
 _active_sessions: dict[str, int] = {}
 
+# Track terminal status: session_id -> "connected" | "working" | "idle"
+_terminal_status: dict[str, str] = {}
+
+
+@router.get("/terminal/status/{session_id}")
+async def get_terminal_status(session_id: str) -> dict:
+    """Get terminal activity status for a session."""
+    return {
+        "ok": True,
+        "data": {
+            "status": _terminal_status.get(session_id, "disconnected"),
+            "tmux_alive": _tmux_session_exists(f"dalkkak-{session_id[:8]}"),
+        },
+    }
+
 
 def _tmux_session_exists(name: str) -> bool:
     """Check if a named tmux session exists."""
@@ -219,6 +234,9 @@ async def websocket_terminal(websocket: WebSocket, session_id: str):
 
     terminal = TerminalSession(session_name)
 
+    # Track terminal activity for status display
+    _terminal_status[session_id] = "connected"
+
     try:
         await terminal.attach(websocket)
 
@@ -226,6 +244,7 @@ async def websocket_terminal(websocket: WebSocket, session_id: str):
             msg = await websocket.receive()
 
             if "bytes" in msg and msg["bytes"]:
+                _terminal_status[session_id] = "working"
                 await terminal.write(msg["bytes"])
             elif "text" in msg and msg["text"]:
                 try:
@@ -238,6 +257,7 @@ async def websocket_terminal(websocket: WebSocket, session_id: str):
                     elif cmd.get("type") == "ping":
                         await websocket.send_text('{"type":"pong"}')
                 except (json.JSONDecodeError, KeyError):
+                    _terminal_status[session_id] = "working"
                     await terminal.write(msg["text"].encode())
 
     except WebSocketDisconnect:
@@ -245,4 +265,5 @@ async def websocket_terminal(websocket: WebSocket, session_id: str):
     except Exception as e:
         logger.error("Terminal error: %s", e)
     finally:
+        _terminal_status[session_id] = "idle"
         await terminal.detach()
