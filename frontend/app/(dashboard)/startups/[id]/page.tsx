@@ -266,6 +266,7 @@ function SessionDetail({
   const [messages, setMessages] = useState<{ role: string; content: string; created_at: string }[]>([]);
   const [acting, setActing] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const [previewStatus, setPreviewStatus] = useState<string | null>(null);
 
   useEffect(() => {
     fetch(`${API_BASE}/api/sessions/${session.id}/messages?startup_id=${startupId}&limit=50`, {
@@ -282,11 +283,28 @@ function SessionDetail({
 
   async function doAction(path: string) {
     setActing(true);
+    if (path === "preview") setPreviewStatus("Launching test environment...");
     try {
-      await fetch(`${API_BASE}/api/sessions/${session.id}/${path}?startup_id=${startupId}`, {
+      const res = await fetch(`${API_BASE}/api/sessions/${session.id}/${path}?startup_id=${startupId}`, {
         method: "POST",
         headers: { Authorization: `Bearer ${getToken()}`, "Content-Type": "application/json" },
       });
+      if (path === "preview") {
+        // Poll for preview_url
+        const poll = setInterval(async () => {
+          onAction();
+          const updated = await fetch(`${API_BASE}/api/startups/${startupId}/sessions`, {
+            headers: { Authorization: `Bearer ${getToken()}` },
+          }).then(r => r.json());
+          const sess = updated.data?.find((s: Session) => s.id === session.id);
+          if (sess?.preview_url) {
+            setPreviewStatus(null);
+            clearInterval(poll);
+            window.open(sess.preview_url, "_blank");
+          }
+        }, 3000);
+        setTimeout(() => { clearInterval(poll); setPreviewStatus(null); }, 60000);
+      }
       onAction();
     } finally { setActing(false); }
   }
