@@ -46,8 +46,11 @@ async def lifespan(app: FastAPI):
     yield
 
     queue_task.cancel()
-    from backend.sessions.preview import stop_all_previews
-    await stop_all_previews()
+    # Don't stop previews on reload — they should survive API restarts
+    # Only stop on production shutdown (not dev hot-reload)
+    if os.environ.get("ENVIRONMENT") != "development":
+        from backend.sessions.preview import stop_all_previews
+        await stop_all_previews()
     logger.info("DalkkakAI API shut down cleanly")
 
 
