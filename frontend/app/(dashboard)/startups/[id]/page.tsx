@@ -98,36 +98,24 @@ function SessionCard({
   const [acting, setActing] = useState(false);
   const cfg = STATUS_CFG[session.status] ?? STATUS_CFG.queued;
 
-  const [previewStatus, setPreviewStatus] = useState<string | null>(null);
-
   async function doAction(path: string) {
     setActing(true);
-    if (path === "preview") setPreviewStatus("Launching preview...");
     try {
       const res = await fetch(`${API_BASE}/api/sessions/${session.id}/${path}?startup_id=${startupId}`, {
         method: "POST",
         headers: { Authorization: `Bearer ${getToken()}`, "Content-Type": "application/json" },
       });
-      const json = await res.json();
-      if (path === "preview" && json.ok) {
-        setPreviewStatus("Preview starting... checking every 3s");
-        // Poll for preview_url to appear
-        const poll = setInterval(async () => {
-          onAction(); // refresh session data
-          const updated = await fetch(`${API_BASE}/api/startups/${startupId}/sessions`, {
-            headers: { Authorization: `Bearer ${getToken()}` },
-          }).then(r => r.json());
-          const sess = updated.data?.find((s: Session) => s.id === session.id);
-          if (sess?.preview_url) {
-            setPreviewStatus(null);
-            clearInterval(poll);
-            window.open(sess.preview_url, "_blank");
-          }
-        }, 3000);
-        // Stop polling after 60s
-        setTimeout(() => { clearInterval(poll); setPreviewStatus(null); }, 60000);
+      if (path === "preview") {
+        const json = await res.json();
+        if (json.ok) {
+          alert("Test environment launching! Check session detail for the link.");
+        } else {
+          alert("Failed: " + (json.error || JSON.stringify(json)));
+        }
       }
       onAction();
+    } catch (err) {
+      alert("Network error: " + err);
     } finally { setActing(false); }
   }
 
