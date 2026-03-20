@@ -109,6 +109,14 @@ export default function Terminal({
           cols: term.cols,
           rows: term.rows,
         }));
+        // Keep-alive ping every 30s to prevent idle disconnect
+        const pingInterval = setInterval(() => {
+          if (ws && ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({ type: "ping" }));
+          } else {
+            clearInterval(pingInterval);
+          }
+        }, 30000);
       };
 
       ws.onmessage = (event: MessageEvent) => {
