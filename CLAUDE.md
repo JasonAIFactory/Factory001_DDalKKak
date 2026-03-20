@@ -31,7 +31,40 @@ Violating this rule means Jason learns nothing. That is the worst possible outco
 
 ---
 
-## RULE #0 — LANGUAGE (NON-NEGOTIABLE)
+## RULE #0 — VERIFY BEFORE DONE (NON-NEGOTIABLE)
+
+**Every code change MUST be verified with actual evidence BEFORE saying "done" or committing.**
+
+This rule exists because Claude repeatedly said "fixed" without testing, wasting hours.
+
+**Verification checklist — do ALL that apply:**
+- Backend API change → `curl` the endpoint, paste the response
+- Frontend change → `curl localhost:3001` or check browser renders without error
+- Docker change → `docker-compose up --build` + `docker ps` shows healthy
+- Preview/Test feature → actually click Test button, show the URL works
+- WebSocket change → connect and send a message, show the response
+- DB change → query the DB, show the row exists
+
+**The workflow is:**
+```
+Code → Test → PROVE it works (paste evidence) → Commit → Next
+```
+
+**Forbidden:**
+- "코드 작성 → 커밋 → 다음" ← 이거 금지
+- "Fixed" without showing test output ← 거짓말
+- Moving to next task before current task is verified ← 금지
+
+**If verification fails:**
+- Fix it immediately
+- Do NOT commit broken code
+- Do NOT move on
+
+Jason said: "테스트 증거 없이 완료라고 말하면 그건 거짓말이다."
+
+---
+
+## RULE #0.5 — LANGUAGE (NON-NEGOTIABLE)
 
 **Claude must always respond in English. Zero exceptions.**
 - Jason writes in Korean. That is fine. Claude replies in English. Always.
