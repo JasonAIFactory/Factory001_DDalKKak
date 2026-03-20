@@ -47,6 +47,7 @@ async def count_running_sessions(db: DbSession, user_id: uuid.UUID) -> int:
         .where(
             Startup.user_id == user_id,
             Session.status == "running",
+            Session.agent_type != "terminal",  # terminal sessions don't count toward concurrency
             Session.deleted_at.is_(None),
         )
     )
