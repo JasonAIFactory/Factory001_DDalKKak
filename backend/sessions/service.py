@@ -34,7 +34,7 @@ def _branch_name(title: str, session_id: uuid.UUID) -> str:
     slug = re.sub(r"[\s_-]+", "-", slug)
     slug = slug[:40].strip("-")
     short_id = str(session_id)[:6]
-    return f"feat/{slug}-{short_id}"
+    return f"session-{slug}-{short_id}"
 
 
 # ── Concurrency guard ─────────────────────────────────────────────────────────
