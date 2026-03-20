@@ -173,15 +173,23 @@ async def _dispatch_session(session: Session, startup: Startup, user_api_key: st
                 )
                 await db.commit()
 
-            # Auto-launch preview if tests passed — user can click URL immediately
-            if test_result.all_passed:
-                worktree = session.worktree_path or f"{repo_path}/worktrees/{session.branch_name}"
-                from backend.sessions.preview import launch_preview
-                asyncio.create_task(launch_preview(
-                    worktree_path=worktree,
-                    startup_id=startup_id,
-                    session_id=session_id,
-                ))
+            # Auto-launch preview regardless of test results — user needs to see the app
+            worktree = session.worktree_path or f"{repo_path}/worktrees/{session.branch_name}"
+            from backend.sessions.preview import launch_preview
+            preview_result = await launch_preview(
+                worktree_path=worktree,
+                startup_id=startup_id,
+                session_id=session_id,
+            )
+            # Save preview URL to DB
+            if preview_result.success and preview_result.url:
+                async with AsyncSessionLocal() as db:
+                    await db.execute(
+                        update(Session)
+                        .where(Session.id == session.id)
+                        .values(preview_url=preview_result.url)
+                    )
+                    await db.commit()
 
             await broadcast_completed(startup_id, session_id, result.summary)
             logger.info("Session completed: %s cost=$%s tests=%s", session_id, result.total_cost, test_result.summary())

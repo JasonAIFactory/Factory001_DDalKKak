@@ -274,27 +274,34 @@ def _build_docker_command(
     Uses the same Python image as the main API (already cached on dev machines).
     Mounts the worktree as a volume — no image rebuild needed per session.
     """
-    # Determine start command based on app type
+    # Determine start command, container port, and base image based on app type
     if app_type in ("fastapi", "unknown"):
-        start_cmd = "pip install -r requirements.txt -q && uvicorn backend.main:app --host 0.0.0.0 --port 8000"
+        start_cmd = "pip install -r requirements.txt -q 2>/dev/null; uvicorn main:app --host 0.0.0.0 --port 8000 2>/dev/null || python main.py"
+        container_port = 8000
+        image = "python:3.11-slim"
     elif app_type == "nextjs":
-        start_cmd = "npm install && npm run dev -- --port 3000"
-    else:  # fullstack
-        start_cmd = "pip install -r requirements.txt -q && uvicorn backend.main:app --host 0.0.0.0 --port 8000"
+        start_cmd = "npm install --silent && npm start"
+        container_port = 3000
+        image = "node:20-slim"
+    else:  # fullstack or generic node
+        start_cmd = "npm install --silent && npm start"
+        container_port = 3000
+        image = "node:20-slim"
 
     return [
         "docker", "run",
         "--detach",
         "--name", container_name,
-        "--publish", f"{preview_port}:8000",
+        "--publish", f"{preview_port}:{container_port}",
         "--volume", f"{worktree_path}:/app",
         "--workdir", "/app",
         "--env", f"DATABASE_URL={preview_db_url}",
         "--env", "ENVIRONMENT=preview",
+        "--env", f"PORT={container_port}",
         "--env", f"SECRET_KEY=preview-{container_name}",
         "--env", "ANTHROPIC_API_KEY=placeholder",
-        "--network", "factory001_ddalkkak_default",  # shared Docker network
-        "python:3.11-slim",
+        "--network", "factory001_ddalkkak_default",
+        image,
         "sh", "-c", start_cmd,
     ]
 
