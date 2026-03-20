@@ -393,7 +393,7 @@ async def launch_preview_endpoint(
 
     if result.success and result.url:
         session.preview_url = result.url
-        await db.flush()
+        await db.commit()
 
     return {
         "ok": result.success,

@@ -253,12 +253,8 @@ def _build_docker_command(
         start_cmd = "pip install -r requirements.txt -q 2>/dev/null; uvicorn main:app --host 0.0.0.0 --port 8000 2>/dev/null || python main.py"
         container_port = 8000
         image = "python:3.11-slim"
-    elif app_type == "nextjs":
-        start_cmd = "node src/index.js || npm start"
-        container_port = 3000
-        image = "node:20-slim"
-    else:  # fullstack or generic node
-        start_cmd = "node src/index.js || npm start"
+    else:  # node, nextjs, fullstack
+        start_cmd = "npm install --silent 2>/dev/null; npm start"
         container_port = 3000
         image = "node:20-slim"
 
