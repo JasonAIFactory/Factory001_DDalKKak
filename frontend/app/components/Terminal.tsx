@@ -77,8 +77,10 @@ export default function Terminal({
           brightWhite: "#c0caf5",
         },
         allowProposedApi: true,
-        convertEol: false,
+        convertEol: true,
         windowsMode: false,
+        scrollOnUserInput: true,
+        fastScrollModifier: "alt",
       });
 
       fitAddon = new FitAddon();
@@ -240,7 +242,7 @@ export default function Terminal({
       {/* Terminal body — fills all available space */}
       <div
         ref={termRef}
-        className="flex-1 overflow-hidden"
+        className="flex-1"
         style={{ padding: "8px 4px 4px 8px" }}
         onContextMenu={(e) => {
           e.preventDefault();
