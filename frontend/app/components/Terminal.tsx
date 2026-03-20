@@ -38,6 +38,7 @@ export default function Terminal({
       const { Terminal: XTerm } = await import("@xterm/xterm");
       const { FitAddon } = await import("@xterm/addon-fit");
       const { WebLinksAddon } = await import("@xterm/addon-web-links");
+      // @ts-expect-error — CSS import works at runtime but TS can't resolve it
       await import("@xterm/xterm/css/xterm.css");
 
       if (!termRef.current) return;
@@ -87,10 +88,12 @@ export default function Terminal({
       term.open(termRef.current);
       xtermRef.current = term;
 
-      // Small delay to ensure DOM is ready for fit
-      requestAnimationFrame(() => {
-        fitAddon.fit();
-      });
+      // Multiple fit attempts — DOM may not be laid out yet on first frame
+      const doFit = () => { try { fitAddon.fit(); } catch {} };
+      requestAnimationFrame(doFit);
+      setTimeout(doFit, 100);
+      setTimeout(doFit, 300);
+      setTimeout(doFit, 600);
 
       // WebSocket to backend PTY
       const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
