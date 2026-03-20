@@ -842,8 +842,12 @@ export default function StartupDetailPage() {
   const [loading, setLoading] = useState(true);
   const [showCreate, setShowCreate] = useState(false);
   const [detailSession, setDetailSession] = useState<Session | null>(null);
+  const detailRef = useRef<Session | null>(null);
   const [filter, setFilter] = useState<"all" | "running" | "ready" | "approved">("all");
   const [wsStatus, setWsStatus] = useState<"connecting" | "connected" | "disconnected">("connecting");
+
+  // Keep ref in sync so load() never has a stale closure
+  useEffect(() => { detailRef.current = detailSession; }, [detailSession]);
 
   const load = useCallback(async () => {
     const [startupRes, sessionsRes] = await Promise.all([
@@ -853,13 +857,14 @@ export default function StartupDetailPage() {
     if (sessionsRes.ok) {
       const items = Array.isArray(sessionsRes.data) ? sessionsRes.data : [];
       setMySessions(items);
-      if (detailSession) {
-        const updated = items.find((s: Session) => s.id === detailSession.id);
+      const current = detailRef.current;
+      if (current) {
+        const updated = items.find((s: Session) => s.id === current.id);
         if (updated) setDetailSession(updated);
       }
     }
     setLoading(false);
-  }, [id, detailSession]);
+  }, [id]);
 
   useEffect(() => { load(); }, [id]);
 
