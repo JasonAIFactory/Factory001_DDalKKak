@@ -98,6 +98,7 @@ async def create(
     if body.agent_type == "terminal":
         # Terminal sessions skip the queue — user controls via web terminal
         session.status = "running"
+        await db.flush()
     else:
         # AI sessions go through the queue → executor picks them up
         await queue_session(db, session)
