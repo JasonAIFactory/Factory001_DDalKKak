@@ -242,8 +242,8 @@ export default function Terminal({
       {/* Terminal body — fills all available space */}
       <div
         ref={termRef}
-        className="flex-1"
-        style={{ padding: "8px 4px 4px 8px" }}
+        className="flex-1 overflow-hidden"
+        style={{ padding: "8px 4px 4px 8px", minHeight: 0 }}
         onContextMenu={(e) => {
           e.preventDefault();
           setCtxMenu({ x: e.clientX, y: e.clientY });
