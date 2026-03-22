@@ -45,6 +45,9 @@ class Settings(BaseSettings):
     RAILWAY_API_KEY: str = ""
     STRIPE_SECRET_KEY: str = ""
     STRIPE_WEBHOOK_SECRET: str = ""
+    STRIPE_PRICE_STARTER: str = ""   # Stripe Price ID for Starter ($29/mo)
+    STRIPE_PRICE_GROWTH: str = ""    # Stripe Price ID for Growth ($99/mo)
+    STRIPE_PRICE_SCALE: str = ""     # Stripe Price ID for Scale ($299/mo)
     RESEND_API_KEY: str = ""
 
     # ── Storage ───────────────────────────────────────────

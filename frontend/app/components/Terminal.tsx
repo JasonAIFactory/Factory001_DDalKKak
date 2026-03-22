@@ -78,9 +78,7 @@ export default function Terminal({
         },
         allowProposedApi: true,
         convertEol: true,
-        windowsMode: false,
         scrollOnUserInput: true,
-        fastScrollModifier: "alt",
       });
 
       fitAddon = new FitAddon();
@@ -187,17 +185,21 @@ export default function Terminal({
         }
       });
 
-      // Resize handling
+      // Resize handling — debounced to avoid excessive fit() calls
+      let resizeTimer: ReturnType<typeof setTimeout> | null = null;
       const doResize = () => {
-        if (!fitAddon || !term) return;
-        fitAddon.fit();
-        if (ws && ws.readyState === WebSocket.OPEN) {
-          ws.send(JSON.stringify({
-            type: "resize",
-            cols: term.cols,
-            rows: term.rows,
-          }));
-        }
+        if (resizeTimer) clearTimeout(resizeTimer);
+        resizeTimer = setTimeout(() => {
+          if (!fitAddon || !term) return;
+          try { fitAddon.fit(); } catch {}
+          if (ws && ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({
+              type: "resize",
+              cols: term.cols,
+              rows: term.rows,
+            }));
+          }
+        }, 50);
       };
 
       resizeObserver = new ResizeObserver(doResize);
@@ -216,7 +218,7 @@ export default function Terminal({
   }, []);
 
   return (
-    <div className={`flex flex-col ${className}`} style={{ backgroundColor: "#1a1b26", height: "100%", position: "absolute", inset: 0 }}>
+    <div className={`flex flex-col ${className}`} style={{ backgroundColor: "#1a1b26", height: "100%", minHeight: 0 }}>
       {/* macOS-style title bar */}
       <div className="flex-shrink-0 flex items-center justify-between px-4 py-1.5"
         style={{ backgroundColor: "#16161e", borderBottom: "1px solid #292e42" }}>
@@ -239,11 +241,11 @@ export default function Terminal({
         </span>
       </div>
 
-      {/* Terminal body — fills all available space */}
+      {/* Terminal body — fills all remaining space via flex */}
       <div
         ref={termRef}
         className="flex-1 overflow-hidden"
-        style={{ padding: "8px 4px 4px 8px", minHeight: 0 }}
+        style={{ padding: "8px 4px 4px 8px", minHeight: 0, position: "relative" }}
         onContextMenu={(e) => {
           e.preventDefault();
           setCtxMenu({ x: e.clientX, y: e.clientY });

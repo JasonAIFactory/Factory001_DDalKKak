@@ -67,18 +67,43 @@ async def _run(cmd: list[str], cwd: str | None = None) -> tuple[int, str, str]:
     )
 
 
+def _health_check_url(preview_url: str) -> str:
+    """
+    Convert a preview URL to one reachable from inside the API container.
+
+    The preview container's port is mapped to the Docker host. From inside the
+    API container, 'localhost' means the API container itself — not the host.
+    On Windows/Mac Docker Desktop, 'host.docker.internal' resolves to the host.
+    On Linux, we fall back to localhost (containers share the host network).
+    """
+    import os
+
+    # When running inside Docker (ENVIRONMENT is set), use host.docker.internal
+    # to reach ports mapped on the Docker host.
+    in_docker = os.path.exists("/.dockerenv") or os.environ.get("ENVIRONMENT")
+    if in_docker:
+        # host.docker.internal works on Docker Desktop (Windows/Mac)
+        # and on Linux with --add-host=host.docker.internal:host-gateway
+        return preview_url.replace("localhost", "host.docker.internal")
+    return preview_url
+
+
 async def _wait_until_healthy(url: str, timeout: int = PREVIEW_STARTUP_TIMEOUT) -> bool:
     """
     Poll a URL until it responds 200 or timeout expires.
     Used to wait for preview containers to finish starting.
+
+    The url should already be converted via _health_check_url() so it is
+    reachable from inside the API container.
     """
     import httpx
 
+    check_url = _health_check_url(url)
     deadline = asyncio.get_event_loop().time() + timeout
     async with httpx.AsyncClient() as client:
         while asyncio.get_event_loop().time() < deadline:
             try:
-                response = await client.get(url, timeout=2.0)
+                response = await client.get(check_url, timeout=2.0)
                 if response.status_code < 500:
                     return True
             except Exception:
@@ -132,21 +157,30 @@ async def _detect_startup_type(worktree_path: str) -> str:
 
     Returns one of:
       'fastapi'   — Python FastAPI app
-      'nextjs'    — Next.js app
+      'nextjs'    — Next.js app (has next.config)
+      'nodejs'    — Plain Node.js app (has package.json but no next.config)
       'fullstack' — Both FastAPI backend + Next.js frontend
       'unknown'   — Can't detect, use generic runner
     """
     path = Path(worktree_path)
     has_main_py = (path / "main.py").exists() or (path / "backend" / "main.py").exists()
     has_package_json = (path / "package.json").exists() or (path / "frontend" / "package.json").exists()
-    has_next_config = (path / "next.config.js").exists() or (path / "next.config.ts").exists()
+    has_next_config = (
+        (path / "next.config.js").exists()
+        or (path / "next.config.ts").exists()
+        or (path / "next.config.mjs").exists()
+    )
+    has_server_js = (path / "server.js").exists()
+    has_src_index = (path / "src" / "index.js").exists()
 
     if has_main_py and (has_package_json or has_next_config):
         return "fullstack"
     if has_main_py:
         return "fastapi"
-    if has_package_json:
+    if has_next_config:
         return "nextjs"
+    if has_package_json or has_server_js or has_src_index:
+        return "nodejs"
     return "unknown"
 
 
@@ -224,9 +258,20 @@ async def launch_preview(
 
     preview_url = f"http://localhost:{preview_port}"
 
-    # Return immediately — don't wait for health check
-    # User clicks the link, browser retries naturally if app is still starting
-    logger.info("Preview launched: session=%s url=%s", session_id, preview_url)
+    # Quick health check — the container may need a few seconds to start.
+    # Use host.docker.internal so we can reach the host-mapped port from
+    # inside the API container.
+    healthy = await _wait_until_healthy(preview_url, timeout=PREVIEW_STARTUP_TIMEOUT)
+    if not healthy:
+        logger.warning(
+            "Preview container started but health check timed out: session=%s url=%s "
+            "(container may still be installing dependencies)",
+            session_id, preview_url,
+        )
+        # Don't fail — the container is running, it just might be slow to start.
+        # The user's browser will retry naturally.
+
+    logger.info("Preview launched: session=%s url=%s healthy=%s", session_id, preview_url, healthy)
     return PreviewResult(
         success=True,
         url=preview_url,
@@ -250,11 +295,30 @@ def _build_docker_command(
     """
     # Determine start command, container port, and base image based on app type
     if app_type in ("fastapi", "unknown"):
-        start_cmd = "pip install -r requirements.txt -q 2>/dev/null; uvicorn main:app --host 0.0.0.0 --port 8000 --reload 2>/dev/null || python main.py"
+        start_cmd = (
+            "pip install -r requirements.txt -q 2>/dev/null; "
+            "uvicorn main:app --host 0.0.0.0 --port 8000 --reload 2>/dev/null "
+            "|| python main.py"
+        )
         container_port = 8000
         image = "python:3.11-slim"
-    else:  # node, nextjs, fullstack
-        start_cmd = "npm install --silent 2>/dev/null; node --watch server.js 2>/dev/null || node --watch src/index.js 2>/dev/null || npm start"
+    elif app_type == "nextjs":
+        # Next.js needs npm install then npm run dev (or npm start for prod)
+        start_cmd = (
+            "npm install --silent && "
+            "(npm run dev -- -p 3000 2>/dev/null || npm start)"
+        )
+        container_port = 3000
+        image = "node:20-slim"
+    else:  # nodejs, fullstack
+        # Plain Node.js: install deps, then try entry points in order:
+        # server.js → src/index.js → npm start
+        start_cmd = (
+            "npm install --silent 2>/dev/null; "
+            "if [ -f server.js ]; then node server.js; "
+            "elif [ -f src/index.js ]; then node src/index.js; "
+            "else npm start; fi"
+        )
         container_port = 3000
         image = "node:20-slim"
 
@@ -280,6 +344,8 @@ def _build_docker_command(
         "--env", f"PORT={container_port}",
         "--env", f"SECRET_KEY=preview-{container_name}",
         "--env", "ANTHROPIC_API_KEY=placeholder",
+        # Ensure host.docker.internal resolves on Linux too
+        "--add-host", "host.docker.internal:host-gateway",
         "--network", "factory001_ddalkkak_default",
         image,
         "sh", "-c", start_cmd,

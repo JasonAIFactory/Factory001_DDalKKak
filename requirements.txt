@@ -22,6 +22,9 @@ httpx==0.27.0
 # AI
 anthropic>=0.40.0
 
+# Payments
+stripe>=8.0.0
+
 # Cache / Queue
 redis[hiredis]==5.0.2
 
