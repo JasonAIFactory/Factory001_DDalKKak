@@ -81,7 +81,59 @@ async def create_startup(
         "GIT_COMMITTER_EMAIL": "bot@dalkkak.ai",
     }
     await asyncio.to_thread(subprocess.run, ["git", "init", "-b", "main", repo_path], capture_output=True)
-    await asyncio.to_thread(subprocess.run, ["git", "commit", "--allow-empty", "-m", "init"], cwd=repo_path, capture_output=True, env=env)
+
+    # Create DalkkakAI CLAUDE.md — rules for Claude Code sessions
+    claude_md_path = os.path.join(repo_path, "CLAUDE.md")
+    claude_md_content = f"""# DalkkakAI Project Rules — {name}
+
+> This file is auto-loaded by Claude Code. Follow every rule.
+
+## RULE 1 — dalkkak.json (MANDATORY)
+When your work is complete, you MUST create a `dalkkak.json` file in the project root:
+```json
+{{
+  "start": "<command to start the server>",
+  "port": <port number the server listens on>,
+  "language": "<python|nodejs|go|java|ruby|rust>"
+}}
+```
+Example for Flask: `{{"start": "python app.py", "port": 5000, "language": "python"}}`
+Example for Express: `{{"start": "node server.js", "port": 3000, "language": "nodejs"}}`
+This file is required for the Test button to work. Without it, the app cannot be previewed.
+
+## RULE 2 — Server Binding
+Always bind to `0.0.0.0`, never `localhost` or `127.0.0.1`.
+Use the `PORT` environment variable if available: `port = int(os.environ.get("PORT", 5000))`
+This is required for Docker container networking.
+
+## RULE 3 — Health Endpoint
+Create a `/health` endpoint that returns `{{"ok": true}}`.
+This is used by the platform to verify the app is running.
+
+## RULE 4 — Environment Variables
+Never hardcode API keys, passwords, or secrets.
+Use `.env` file + add `.env` to `.gitignore`.
+
+## RULE 5 — Dependencies
+Python: always include `requirements.txt` with all dependencies.
+Node.js: `package.json` must have a valid `scripts.start` entry.
+
+## RULE 6 — Code Quality
+- Error handling on all endpoints
+- UTF-8 encoding everywhere
+- README.md with setup instructions
+"""
+    with open(claude_md_path, "w", encoding="utf-8") as f:
+        f.write(claude_md_content)
+
+    # Initial commit with CLAUDE.md
+    await asyncio.to_thread(
+        subprocess.run, ["git", "add", "CLAUDE.md"], cwd=repo_path, capture_output=True
+    )
+    await asyncio.to_thread(
+        subprocess.run, ["git", "commit", "-m", "init: DalkkakAI project with CLAUDE.md"],
+        cwd=repo_path, capture_output=True, env=env,
+    )
 
     return startup
 
