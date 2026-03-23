@@ -19,7 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession as DbSession
 from backend.config import settings
 from backend.models.session import Session, SessionFileChange, SessionMessage
 from backend.models.startup import Startup
-from backend.sessions.git import cleanup_worktree, create_worktree, merge_branch
+from backend.sessions.git import cleanup_worktree, create_worktree, merge_session_branch
 
 
 def _branch_name(title: str, session_id: uuid.UUID) -> str:
@@ -270,22 +270,27 @@ async def merge_session(
     3. If clean → mark merged, trigger deploy
     4. If conflict → mark conflict, return conflicting files
     """
-    if session.status not in ("review", "done"):
+    allowed = ("review", "done", "completed")
+    if session.status not in allowed:
         raise ValueError(f"Cannot merge session with status: {session.status}")
 
     session.status = "merging"
     await db.flush()
 
     repo_path = _get_local_repo_path(startup)
-    result = await merge_branch(repo_path, session.branch_name)
+    result = await merge_session_branch(repo_path, session.branch_name)
 
     if result.success:
-        session.status = "merged"
+        session.status = "completed"
+        session.completed_at = session.completed_at or datetime.now(UTC)
+        session.progress = 100
         await db.flush()
 
         # Clean up worktree — no longer needed after merge
         if session.worktree_path:
-            await cleanup_worktree(repo_path, session.branch_name)
+            await cleanup_worktree(
+                repo_path, session.branch_name, session.worktree_path
+            )
             session.worktree_path = None
             await db.flush()
 

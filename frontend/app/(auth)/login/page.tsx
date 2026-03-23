@@ -20,14 +20,18 @@ export default function LoginPage() {
     setError("");
     setLoading(true);
 
+    console.log("[LOGIN] Attempting login:", email);
     const result = await auth.login(email, password);
+    console.log("[LOGIN] Result:", JSON.stringify(result));
 
     if (!result.ok) {
+      console.error("[LOGIN] Failed:", result.error);
       setError(result.error);
       setLoading(false);
       return;
     }
 
+    console.log("[LOGIN] Success, setting token");
     setToken(result.data.token.access_token);
     router.push("/dashboard");
   }

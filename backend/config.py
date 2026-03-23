@@ -43,6 +43,7 @@ class Settings(BaseSettings):
     # ── External services ─────────────────────────────────
     GITHUB_TOKEN: str = ""
     RAILWAY_API_KEY: str = ""
+    RAILWAY_API_URL: str = "https://backboard.railway.app/graphql/v2"
     STRIPE_SECRET_KEY: str = ""
     STRIPE_WEBHOOK_SECRET: str = ""
     STRIPE_PRICE_STARTER: str = ""   # Stripe Price ID for Starter ($29/mo)

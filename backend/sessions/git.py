@@ -139,26 +139,42 @@ async def create_worktree(repo_path: str, branch: str) -> WorktreeResult:
     return WorktreeResult(success=True, path=worktree_path)
 
 
-async def cleanup_worktree(repo_path: str, branch: str) -> bool:
+async def cleanup_worktree(
+    repo_path: str,
+    branch: str,
+    worktree_path: str | None = None,
+) -> bool:
     """
     Remove a worktree and its branch after merge or cancellation.
-    Returns True on success.
+
+    Args:
+        repo_path: Path to the main git repository.
+        branch: Branch name to delete after worktree removal.
+        worktree_path: Explicit worktree directory path. If None,
+                       defaults to {repo_path}/worktrees/{branch}.
+
+    Returns True on success. Logs warnings on partial failures
+    but never raises — cleanup is best-effort.
     """
-    worktree_path = str(Path(repo_path) / "worktrees" / branch)
+    resolved_path = worktree_path or str(Path(repo_path) / "worktrees" / branch)
 
     # Remove the worktree directory
     rc, _, err = await _run_git(
-        ["worktree", "remove", worktree_path, "--force"],
+        ["worktree", "remove", resolved_path, "--force"],
         cwd=repo_path,
     )
     if rc != 0:
-        logger.warning("Worktree remove failed: %s", err)
+        logger.warning("Worktree remove failed (path=%s): %s", resolved_path, err)
+
+    # Prune stale worktree references
+    await _run_git(["worktree", "prune"], cwd=repo_path)
 
     # Delete the branch
     rc, _, err = await _run_git(["branch", "-D", branch], cwd=repo_path)
     if rc != 0:
-        logger.warning("Branch delete failed: %s", err)
+        logger.warning("Branch delete failed (branch=%s): %s", branch, err)
 
+    logger.info("Cleaned up worktree: branch=%s path=%s", branch, resolved_path)
     return True
 
 
@@ -178,31 +194,37 @@ async def commit_session_work(worktree_path: str, message: str) -> bool:
     return rc == 0
 
 
-async def merge_branch(repo_path: str, branch: str) -> MergeResult:
+async def merge_session_branch(repo_path: str, branch_name: str) -> MergeResult:
     """
     Merge a session's branch back into main.
 
-    Strategy (from SESSIONS.md):
-    1. Attempt --no-ff merge (preserves branch history)
-    2. On conflict: try auto-resolution for simple cases
-    3. On complex conflict: return conflicting files for user review
+    Steps:
+    1. Checkout main (ensures merge target is correct)
+    2. Attempt --no-ff merge (preserves branch history)
+    3. On conflict: abort merge, return conflicting files for user review
 
     --no-ff = no fast-forward, keeps merge commit in history
     so we can always trace which session produced which code.
     """
-    # Attempt the merge
+    # Step 1: checkout main to ensure we merge INTO main
+    rc, _, stderr = await _run_git(["checkout", "main"], cwd=repo_path)
+    if rc != 0:
+        logger.error("Failed to checkout main: %s", stderr)
+        return MergeResult(success=False, reason=f"checkout main failed: {stderr}")
+
+    # Step 2: attempt the merge
     rc, _, stderr = await _run_git(
-        ["merge", branch, "--no-ff", "-m", f"merge: {branch}"],
+        ["merge", branch_name, "--no-ff", "-m", f"merge: {branch_name}"],
         cwd=repo_path,
     )
 
     if rc == 0:
-        logger.info("Clean merge: branch=%s", branch)
+        logger.info("Clean merge: branch=%s", branch_name)
         return MergeResult(success=True)
 
-    # Conflict detected — parse which files
+    # Step 3: conflict detected — parse which files
     conflicting_files = _parse_conflict_files(stderr)
-    logger.warning("Merge conflict: branch=%s files=%s", branch, conflicting_files)
+    logger.warning("Merge conflict: branch=%s files=%s", branch_name, conflicting_files)
 
     # Abort the failed merge to restore clean state
     await _run_git(["merge", "--abort"], cwd=repo_path)
@@ -212,6 +234,14 @@ async def merge_branch(repo_path: str, branch: str) -> MergeResult:
         reason="conflict",
         conflicting_files=conflicting_files,
     )
+
+
+async def merge_branch(repo_path: str, branch: str) -> MergeResult:
+    """
+    Backward-compatible alias for merge_session_branch.
+    Delegates to merge_session_branch which properly checks out main first.
+    """
+    return await merge_session_branch(repo_path, branch)
 
 
 async def get_diff_stat(worktree_path: str) -> dict:
