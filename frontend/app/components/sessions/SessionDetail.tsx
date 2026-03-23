@@ -116,8 +116,8 @@ export default function SessionDetail({
           {session.status === "completed" && (
             <Btn icon={<GitMerge className="w-3 h-3" />} label="Merge & Deploy" color={C.accentPurple} onClick={() => doAction("merge")} disabled={acting} />
           )}
-          {["review", "completed", "running"].includes(session.status) && !session.preview_url && (
-            <Btn icon={<Play className="w-3 h-3" />} label="Test Run" color={C.accentCyan} onClick={() => doAction("preview")} disabled={acting} />
+          {["review", "completed", "running"].includes(session.status) && (
+            <Btn icon={<Play className="w-3 h-3" />} label={session.preview_url ? "Re-Test" : "Test Run"} color={C.accentCyan} onClick={() => doAction("preview")} disabled={acting} />
           )}
           {session.preview_url && (
             <a href={session.preview_url} target="_blank" rel="noopener noreferrer"
