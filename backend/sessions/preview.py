@@ -153,44 +153,53 @@ async def _create_preview_db_schema(session_id: str) -> str:
 
 async def _detect_startup_type(worktree_path: str) -> str:
     """
-    Detect what kind of app is in the worktree.
+    Detect what kind of app is in the worktree and how to run it.
 
-    Returns one of:
-      'fastapi'   — Python FastAPI app
-      'nextjs'    — Next.js app (has next.config)
-      'nodejs'    — Plain Node.js app (has package.json but no next.config)
-      'fullstack' — Both FastAPI backend + Next.js frontend
-      'unknown'   — Can't detect, use generic runner
+    Priority order:
+      1. dalkkak.json — explicit config (always wins)
+      2. Procfile — industry standard
+      3. Dockerfile — build and run
+      4. package.json — Node.js (check scripts.start)
+      5. requirements.txt + *.py — Python (find server file)
+      6. index.html — static site
+      7. unknown — best guess
     """
-    path = Path(worktree_path)
-    has_main_py = (
-        (path / "main.py").exists()
-        or (path / "app.py").exists()
-        or (path / "server.py").exists()
-        or (path / "run.py").exists()
-        or (path / "backend" / "main.py").exists()
-    )
-    has_package_json = (path / "package.json").exists() or (path / "frontend" / "package.json").exists()
-    has_next_config = (
-        (path / "next.config.js").exists()
-        or (path / "next.config.ts").exists()
-        or (path / "next.config.mjs").exists()
-    )
-    has_server_js = (path / "server.js").exists()
-    has_src_index = (path / "src" / "index.js").exists()
+    import json as _json
 
-    if has_main_py and (has_package_json or has_next_config):
-        return "fullstack"
-    if has_main_py:
-        return "fastapi"
+    path = Path(worktree_path)
+
+    # 1. dalkkak.json — explicit config always wins
+    dalkkak_conf = path / "dalkkak.json"
+    if dalkkak_conf.exists():
+        return "dalkkak"
+
+    # 2. Procfile
+    if (path / "Procfile").exists():
+        return "procfile"
+
+    # 3. Dockerfile
+    if (path / "Dockerfile").exists():
+        return "dockerfile"
+
+    # 4. Node.js detection
+    has_package_json = (path / "package.json").exists()
+    has_next_config = any(
+        (path / f).exists()
+        for f in ("next.config.js", "next.config.ts", "next.config.mjs")
+    )
     if has_next_config:
         return "nextjs"
-    if has_package_json or has_server_js or has_src_index:
+    if has_package_json:
         return "nodejs"
 
-    # Check for static HTML files
-    has_html = (path / "index.html").exists()
-    if has_html:
+    # 5. Python detection
+    has_requirements = (path / "requirements.txt").exists()
+    has_any_py = any(path.glob("*.py"))
+    if has_requirements or has_any_py:
+        return "python"
+
+    # 6. Static HTML
+    if (path / "index.html").exists():
         return "static"
 
     return "unknown"
@@ -305,42 +314,105 @@ def _build_docker_command(
     Uses the same Python image as the main API (already cached on dev machines).
     Mounts the worktree as a volume — no image rebuild needed per session.
     """
+    import json as _json
+
     # Determine start command, container port, and base image based on app type
-    if app_type in ("fastapi", "unknown"):
+    worktree = Path(worktree_path)
+
+    if app_type == "dalkkak":
+        # dalkkak.json — explicit config, always wins
+        conf = _json.loads((worktree / "dalkkak.json").read_text())
+        start_cmd = conf.get("start", "echo 'No start command in dalkkak.json'")
+        container_port = conf.get("port", 8000)
+        lang = conf.get("language", "python")
+        image = "node:20-slim" if lang in ("node", "nodejs", "javascript") else "python:3.11-slim"
+        # Install deps if needed
+        if lang in ("node", "nodejs", "javascript"):
+            start_cmd = f"npm install --silent 2>/dev/null; {start_cmd}"
+        elif (worktree / "requirements.txt").exists():
+            start_cmd = f"pip install -r requirements.txt -q 2>/dev/null; {start_cmd}"
+
+    elif app_type == "procfile":
+        # Read first web: line from Procfile
+        procfile_text = (worktree / "Procfile").read_text()
+        for line in procfile_text.splitlines():
+            if line.startswith("web:"):
+                start_cmd = line.split(":", 1)[1].strip()
+                break
+        else:
+            start_cmd = procfile_text.splitlines()[0].split(":", 1)[-1].strip()
+        container_port = 8000
+        has_pkg = (worktree / "package.json").exists()
+        image = "node:20-slim" if has_pkg else "python:3.11-slim"
+        if has_pkg:
+            start_cmd = f"npm install --silent 2>/dev/null; {start_cmd}"
+        elif (worktree / "requirements.txt").exists():
+            start_cmd = f"pip install -r requirements.txt -q 2>/dev/null; {start_cmd}"
+
+    elif app_type == "dockerfile":
+        # Will be handled differently — build from Dockerfile
+        start_cmd = ""
+        container_port = 8000
+        image = ""  # not used for dockerfile
+
+    elif app_type == "nextjs":
+        start_cmd = "npm install --silent && npm run dev -- -p 3000"
+        container_port = 3000
+        image = "node:20-slim"
+
+    elif app_type == "nodejs":
+        # Read start command from package.json if available
+        pkg_path = worktree / "package.json"
+        pkg_start = None
+        if pkg_path.exists():
+            try:
+                pkg = _json.loads(pkg_path.read_text())
+                pkg_start = pkg.get("scripts", {}).get("start")
+            except Exception:
+                pass
+        if pkg_start:
+            start_cmd = f"npm install --silent 2>/dev/null; npm start"
+        else:
+            start_cmd = (
+                "npm install --silent 2>/dev/null; "
+                "if [ -f server.js ]; then node server.js; "
+                "elif [ -f src/index.js ]; then node src/index.js; "
+                "elif [ -f index.js ]; then node index.js; "
+                "else npm start; fi"
+            )
+        container_port = 3000
+        image = "node:20-slim"
+
+    elif app_type == "python":
+        # Find the Python entry point by checking for server frameworks
+        py_files = list(worktree.glob("*.py"))
+        entry = None
+        for f in py_files:
+            try:
+                content = f.read_text(errors="ignore")
+                if any(kw in content for kw in ("Flask(", "FastAPI(", "app.run(", "uvicorn")):
+                    entry = f.name
+                    break
+            except Exception:
+                continue
+        if not entry and py_files:
+            entry = py_files[0].name
         start_cmd = (
             "pip install -r requirements.txt -q 2>/dev/null; "
-            "if [ -f main.py ]; then python main.py; "
-            "elif [ -f app.py ]; then python app.py; "
-            "elif [ -f server.py ]; then python server.py; "
-            "elif [ -f run.py ]; then python run.py; "
-            "else uvicorn main:app --host 0.0.0.0 --port 8000 --reload; fi"
+            f"python {entry or 'app.py'}"
         )
         container_port = 5000
         image = "python:3.11-slim"
-    elif app_type == "nextjs":
-        # Next.js needs npm install then npm run dev (or npm start for prod)
-        start_cmd = (
-            "npm install --silent && "
-            "(npm run dev -- -p 3000 2>/dev/null || npm start)"
-        )
-        container_port = 3000
-        image = "node:20-slim"
+
     elif app_type == "static":
-        # Pure HTML/CSS/JS — serve with Python http.server
         start_cmd = "python -m http.server 8080"
         container_port = 8080
         image = "python:3.11-slim"
-    else:  # nodejs, fullstack
-        # Plain Node.js: install deps, then try entry points in order:
-        # server.js → src/index.js → npm start
-        start_cmd = (
-            "npm install --silent 2>/dev/null; "
-            "if [ -f server.js ]; then node server.js; "
-            "elif [ -f src/index.js ]; then node src/index.js; "
-            "else npm start; fi"
-        )
-        container_port = 3000
-        image = "node:20-slim"
+
+    else:  # unknown
+        start_cmd = "echo 'Cannot detect how to run this app. Add dalkkak.json.'"
+        container_port = 8000
+        image = "python:3.11-slim"
 
     # Convert container path (/workspace/...) to host path for Docker volume mount
     # HOST_PROJECT_ROOT must be the absolute host path to the project root
