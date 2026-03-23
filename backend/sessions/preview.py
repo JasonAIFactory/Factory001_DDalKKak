@@ -163,7 +163,13 @@ async def _detect_startup_type(worktree_path: str) -> str:
       'unknown'   — Can't detect, use generic runner
     """
     path = Path(worktree_path)
-    has_main_py = (path / "main.py").exists() or (path / "backend" / "main.py").exists()
+    has_main_py = (
+        (path / "main.py").exists()
+        or (path / "app.py").exists()
+        or (path / "server.py").exists()
+        or (path / "run.py").exists()
+        or (path / "backend" / "main.py").exists()
+    )
     has_package_json = (path / "package.json").exists() or (path / "frontend" / "package.json").exists()
     has_next_config = (
         (path / "next.config.js").exists()
@@ -303,10 +309,13 @@ def _build_docker_command(
     if app_type in ("fastapi", "unknown"):
         start_cmd = (
             "pip install -r requirements.txt -q 2>/dev/null; "
-            "uvicorn main:app --host 0.0.0.0 --port 8000 --reload 2>/dev/null "
-            "|| python main.py"
+            "if [ -f main.py ]; then python main.py; "
+            "elif [ -f app.py ]; then python app.py; "
+            "elif [ -f server.py ]; then python server.py; "
+            "elif [ -f run.py ]; then python run.py; "
+            "else uvicorn main:app --host 0.0.0.0 --port 8000 --reload; fi"
         )
-        container_port = 8000
+        container_port = 5000
         image = "python:3.11-slim"
     elif app_type == "nextjs":
         # Next.js needs npm install then npm run dev (or npm start for prod)
