@@ -17,7 +17,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from backend.auth.router import router as auth_router
+from backend.billing.router import router as billing_router
 from backend.config import settings
+from backend.deploy.router import router as deploy_router
 from backend.sessions.router import router as sessions_router
 from backend.startups.router import router as startups_router
 from backend.terminal.router import router as terminal_router
@@ -76,8 +78,10 @@ app.add_middleware(
 
 # ── Routers ───────────────────────────────────────────────────────────────────
 app.include_router(auth_router, prefix="/api")
+app.include_router(billing_router)
 app.include_router(startups_router, prefix="/api")
 app.include_router(sessions_router, prefix="/api")
+app.include_router(deploy_router, prefix="/api")
 app.include_router(terminal_router)  # WebSocket at /ws/terminal
 
 # ── HTTP exception handler ────────────────────────────────────────────────────

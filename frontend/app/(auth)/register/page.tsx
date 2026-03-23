@@ -4,12 +4,15 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { auth, setToken } from "@/lib/api";
+import { useT } from "@/lib/i18n";
 
 /**
  * Register page — creates account then immediately logs in.
+ * All user-facing strings loaded via i18n t() for KO/EN support.
  */
 export default function RegisterPage() {
   const router = useRouter();
+  const { t } = useT();
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -32,7 +35,7 @@ export default function RegisterPage() {
     // Auto-login after register
     const loginResult = await auth.login(email, password);
     if (!loginResult.ok) {
-      setError("Account created — please sign in.");
+      setError(t("auth.accountCreatedSignIn"));
       router.push("/login");
       return;
     }
@@ -46,17 +49,23 @@ export default function RegisterPage() {
       <div className="w-full max-w-md">
         {/* Logo */}
         <div className="text-center mb-8">
-          <h1 className="text-3xl font-bold text-white">딸깍 AI</h1>
-          <p className="text-gray-400 mt-2 text-sm">Your startup operating system</p>
+          <h1 className="text-3xl font-bold text-white">{t("landing.brand")}</h1>
+          <p className="text-gray-400 mt-2 text-sm">
+            {t("auth.brandSubtitle")}
+          </p>
         </div>
 
         {/* Card */}
         <div className="bg-gray-900 border border-gray-800 rounded-2xl p-8">
-          <h2 className="text-xl font-semibold text-white mb-6">Create account</h2>
+          <h2 className="text-xl font-semibold text-white mb-6">
+            {t("auth.createAccount")}
+          </h2>
 
           <form onSubmit={handleSubmit} className="space-y-4">
             <div>
-              <label className="block text-sm text-gray-400 mb-1.5">Name</label>
+              <label className="block text-sm text-gray-400 mb-1.5">
+                {t("auth.name")}
+              </label>
               <input
                 type="text"
                 required
@@ -68,7 +77,9 @@ export default function RegisterPage() {
             </div>
 
             <div>
-              <label className="block text-sm text-gray-400 mb-1.5">Email</label>
+              <label className="block text-sm text-gray-400 mb-1.5">
+                {t("auth.email")}
+              </label>
               <input
                 type="email"
                 required
@@ -80,7 +91,9 @@ export default function RegisterPage() {
             </div>
 
             <div>
-              <label className="block text-sm text-gray-400 mb-1.5">Password</label>
+              <label className="block text-sm text-gray-400 mb-1.5">
+                {t("auth.password")}
+              </label>
               <input
                 type="password"
                 required
@@ -103,14 +116,17 @@ export default function RegisterPage() {
               disabled={loading}
               className="w-full bg-indigo-600 hover:bg-indigo-500 disabled:bg-indigo-800 disabled:cursor-not-allowed text-white font-medium rounded-lg py-2.5 transition-colors"
             >
-              {loading ? "Creating account..." : "Create account"}
+              {loading ? t("auth.creatingAccount") : t("auth.createAccount")}
             </button>
           </form>
 
           <p className="text-center text-gray-500 text-sm mt-6">
-            Already have an account?{" "}
-            <Link href="/login" className="text-indigo-400 hover:text-indigo-300">
-              Sign in
+            {t("auth.hasAccount")}{" "}
+            <Link
+              href="/login"
+              className="text-indigo-400 hover:text-indigo-300"
+            >
+              {t("auth.signIn")}
             </Link>
           </p>
         </div>
