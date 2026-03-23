@@ -122,16 +122,51 @@ Node.js: `package.json` must have a valid `scripts.start` entry.
 - Error handling on all endpoints
 - UTF-8 encoding everywhere
 - README.md with setup instructions
+
+## RULE 7 — Project Scope
+This is ONE product: {name}.
+All sessions in this project build parts of the SAME product.
+Do not create unrelated applications.
+Check existing files before creating new ones — build on what exists.
 """
     with open(claude_md_path, "w", encoding="utf-8") as f:
         f.write(claude_md_content)
 
-    # Initial commit with CLAUDE.md
+    # Shared rules content for all AI tools
+    shared_rules = f"""Project: {name}
+
+Rules:
+1. On completion, create dalkkak.json in project root with: start (command), port (number), language (python|nodejs|go|java|ruby|rust)
+2. Bind servers to 0.0.0.0, never localhost. Use PORT env var if available.
+3. Include /health endpoint returning {{"ok": true}}
+4. Never hardcode secrets. Use .env file + .gitignore.
+5. Include requirements.txt (Python) or package.json with scripts.start (Node.js).
+6. Add error handling on all endpoints. UTF-8 everywhere. Include README.md.
+7. This is ONE product. All sessions build parts of the same product. Check existing files first.
+"""
+
+    # .codex/instructions — OpenAI Codex
+    codex_dir = os.path.join(repo_path, ".codex")
+    os.makedirs(codex_dir, exist_ok=True)
+    with open(os.path.join(codex_dir, "instructions"), "w", encoding="utf-8") as f:
+        f.write(shared_rules)
+
+    # .cursorrules — Cursor
+    with open(os.path.join(repo_path, ".cursorrules"), "w", encoding="utf-8") as f:
+        f.write(shared_rules)
+
+    # .github/copilot-instructions.md — GitHub Copilot
+    copilot_dir = os.path.join(repo_path, ".github")
+    os.makedirs(copilot_dir, exist_ok=True)
+    with open(os.path.join(copilot_dir, "copilot-instructions.md"), "w", encoding="utf-8") as f:
+        f.write(shared_rules)
+
+    # Initial commit with all convention files
     await asyncio.to_thread(
-        subprocess.run, ["git", "add", "CLAUDE.md"], cwd=repo_path, capture_output=True
+        subprocess.run, ["git", "add", "."], cwd=repo_path, capture_output=True
     )
     await asyncio.to_thread(
-        subprocess.run, ["git", "commit", "-m", "init: DalkkakAI project with CLAUDE.md"],
+        subprocess.run, ["git", "commit", "-m", "init: DalkkakAI project with multi-tool conventions"],
         cwd=repo_path, capture_output=True, env=env,
     )
 
