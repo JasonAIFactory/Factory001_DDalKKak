@@ -33,6 +33,7 @@ export default function Terminal({
     let term: any = null;
     let fitAddon: any = null;
     let resizeObserver: ResizeObserver | null = null;
+    let pingInterval: ReturnType<typeof setInterval> | null = null;
 
     (async () => {
       const { Terminal: XTerm } = await import("@xterm/xterm");
@@ -112,26 +113,35 @@ export default function Terminal({
           cols: term.cols,
           rows: term.rows,
         }));
-        // Keep-alive ping every 30s to prevent idle disconnect
-        const pingInterval = setInterval(() => {
+        // Keep-alive ping every 25s to prevent idle disconnect
+        pingInterval = setInterval(() => {
           if (ws && ws.readyState === WebSocket.OPEN) {
             ws.send(JSON.stringify({ type: "ping" }));
           } else {
-            clearInterval(pingInterval);
+            if (pingInterval) clearInterval(pingInterval);
+            pingInterval = null;
           }
-        }, 30000);
+        }, 25000);
       };
 
       ws.onmessage = (event: MessageEvent) => {
         if (event.data instanceof ArrayBuffer) {
           term.write(new Uint8Array(event.data));
         } else {
+          // Ignore pong heartbeat responses — they just keep the connection alive
+          try {
+            const parsed = JSON.parse(event.data);
+            if (parsed.type === "pong") return;
+          } catch {
+            // Not JSON — normal terminal output, write it
+          }
           term.write(event.data);
         }
       };
 
       ws.onclose = () => {
         setConnected(false);
+        if (pingInterval) { clearInterval(pingInterval); pingInterval = null; }
         term.write("\r\n\x1b[31m[Disconnected]\x1b[0m\r\n");
       };
 
@@ -209,6 +219,7 @@ export default function Terminal({
     })();
 
     return () => {
+      if (pingInterval) { clearInterval(pingInterval); pingInterval = null; }
       if (resizeObserver) resizeObserver.disconnect();
       if (ws && ws.readyState === WebSocket.OPEN) ws.close();
       if (term) term.dispose();
