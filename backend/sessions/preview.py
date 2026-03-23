@@ -181,6 +181,12 @@ async def _detect_startup_type(worktree_path: str) -> str:
         return "nextjs"
     if has_package_json or has_server_js or has_src_index:
         return "nodejs"
+
+    # Check for static HTML files
+    has_html = (path / "index.html").exists()
+    if has_html:
+        return "static"
+
     return "unknown"
 
 
@@ -310,6 +316,11 @@ def _build_docker_command(
         )
         container_port = 3000
         image = "node:20-slim"
+    elif app_type == "static":
+        # Pure HTML/CSS/JS — serve with Python http.server
+        start_cmd = "python -m http.server 8080"
+        container_port = 8080
+        image = "python:3.11-slim"
     else:  # nodejs, fullstack
         # Plain Node.js: install deps, then try entry points in order:
         # server.js → src/index.js → npm start
