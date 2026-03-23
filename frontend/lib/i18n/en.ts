@@ -189,6 +189,16 @@ const en: Record<TranslationKey, string> = {
   "pricing.perMonth": "/ mo",
   "pricing.currentPlan": "Current Plan",
   "pricing.upgrade": "Upgrade",
+
+  // Philosophy
+  "philosophy.label": "Our Philosophy",
+  "philosophy.quote": "We swallow the complexity. You just click.",
+  "philosophy.line1": "Everyone has an idea. But most give up because they can't code. We eliminate that barrier.",
+  "philosophy.line2": "Describe your idea and AI builds it. One button to test. One button to launch.",
+  "philosophy.line3": "That is 딸깍.",
+  "philosophy.step1": "Click",
+  "philosophy.step2": "AI Builds",
+  "philosophy.step3": "Goes Live",
 } as const;
 
 export default en;

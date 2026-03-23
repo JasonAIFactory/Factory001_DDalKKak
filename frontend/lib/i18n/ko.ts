@@ -186,6 +186,16 @@ const ko = {
   "pricing.perMonth": "/ 월",
   "pricing.currentPlan": "현재 플랜",
   "pricing.upgrade": "업그레이드",
+
+  // Philosophy
+  "philosophy.label": "딸깍의 철학",
+  "philosophy.quote": "복잡함은 우리가 삼킨다. 유저는 딸깍만 한다.",
+  "philosophy.line1": "모든 사람은 아이디어를 가지고 있다. 하지만 대부분은 코딩을 못 해서 포기한다. 우리는 그 장벽을 없앤다.",
+  "philosophy.line2": "아이디어를 말하면 AI가 만든다. 테스트 버튼 하나로 확인한다. 배포 버튼 하나로 세상에 내놓는다.",
+  "philosophy.line3": "이것이 딸깍이다.",
+  "philosophy.step1": "딸깍",
+  "philosophy.step2": "AI가 만든다",
+  "philosophy.step3": "세상에 나간다",
 } as const;
 
 export type TranslationKey = keyof typeof ko;

@@ -384,6 +384,59 @@ function FAQ() {
 }
 
 /* ─────────────────────────────────────────────
+   Philosophy
+   ───────────────────────────────────────────── */
+function Philosophy() {
+  const { t } = useT();
+  return (
+    <section className="py-32 relative overflow-hidden">
+      <div className="absolute inset-0 pointer-events-none">
+        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[800px] h-[800px] bg-indigo-500/5 rounded-full blur-[150px]" />
+      </div>
+      <div className="max-w-4xl mx-auto px-6 text-center relative z-10">
+        <p className="text-indigo-400 font-mono text-sm tracking-widest uppercase mb-6">
+          {t("philosophy.label")}
+        </p>
+        <h2 className="text-4xl sm:text-5xl font-bold mb-12 leading-tight">
+          <span className="bg-gradient-to-r from-indigo-400 via-purple-400 to-pink-400 bg-clip-text text-transparent">
+            &ldquo;{t("philosophy.quote")}&rdquo;
+          </span>
+        </h2>
+        <div className="space-y-6 text-lg sm:text-xl text-[#a0aec0] leading-relaxed max-w-2xl mx-auto">
+          <p>{t("philosophy.line1")}</p>
+          <p>{t("philosophy.line2")}</p>
+          <p className="text-white font-semibold text-2xl pt-4">
+            {t("philosophy.line3")}
+          </p>
+        </div>
+        <div className="mt-16 flex items-center justify-center gap-8">
+          <div className="flex flex-col items-center">
+            <div className="w-16 h-16 rounded-2xl bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center mb-3">
+              <MousePointerClick className="w-7 h-7 text-indigo-400" />
+            </div>
+            <span className="text-sm text-[#a0aec0]">{t("philosophy.step1")}</span>
+          </div>
+          <ArrowRight className="w-5 h-5 text-[#4a5568]" />
+          <div className="flex flex-col items-center">
+            <div className="w-16 h-16 rounded-2xl bg-purple-500/10 border border-purple-500/20 flex items-center justify-center mb-3">
+              <Cpu className="w-7 h-7 text-purple-400" />
+            </div>
+            <span className="text-sm text-[#a0aec0]">{t("philosophy.step2")}</span>
+          </div>
+          <ArrowRight className="w-5 h-5 text-[#4a5568]" />
+          <div className="flex flex-col items-center">
+            <div className="w-16 h-16 rounded-2xl bg-green-500/10 border border-green-500/20 flex items-center justify-center mb-3">
+              <Globe className="w-7 h-7 text-green-400" />
+            </div>
+            <span className="text-sm text-[#a0aec0]">{t("philosophy.step3")}</span>
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+/* ─────────────────────────────────────────────
    CTA Banner
    ───────────────────────────────────────────── */
 function CTABanner() {
@@ -607,6 +660,7 @@ export default function LandingPage() {
         <HowItWorks />
         <Features />
         <Pricing />
+        <Philosophy />
         <FAQ />
         <CTABanner />
       </main>
