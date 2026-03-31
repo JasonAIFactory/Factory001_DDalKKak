@@ -1,190 +1,445 @@
-# DalkkakAI — 개발 시작 가이드
+<p align="center">
+  <h1 align="center">DalkkakAI — The Startup Operating System</h1>
+  <p align="center">
+    <em>Describe your startup. Click once. We build, deploy, monitor, market, and bill — all from one dashboard.</em>
+  </p>
+</p>
 
-> 개발자든 비개발자든 이 문서 하나로 시작할 수 있습니다.
-> 터미널을 한 번도 안 써봤어도 괜찮습니다. 그냥 따라하세요.
-
----
-
-## 딱 두 가지만 설치하면 됩니다
-
-### 1. Docker Desktop
-
-AI 에이전트, 데이터베이스, 서버가 전부 Docker 안에서 돌아갑니다.
-PostgreSQL 따로 설치? 필요 없습니다. 전부 자동입니다.
-
-**[Docker Desktop 다운로드 →](https://www.docker.com/products/docker-desktop)**
-
-- Windows: 다운로드 → 설치 → 재시작
-- 설치 후 Docker 아이콘(🐋)이 작업표시줄에 보이면 완료
-
----
-
-### 2. Git
-
-코드 버전 관리에 필요합니다.
-
-**[Git 다운로드 →](https://git-scm.com/downloads)**
-
-- Windows: 다운로드 → "Next" 계속 클릭 → 설치 완료
+<p align="center">
+  <img src="https://img.shields.io/badge/python-3.11+-blue?logo=python&logoColor=white" alt="Python 3.11+"/>
+  <img src="https://img.shields.io/badge/FastAPI-async-009688?logo=fastapi&logoColor=white" alt="FastAPI"/>
+  <img src="https://img.shields.io/badge/Next.js-14-black?logo=next.js&logoColor=white" alt="Next.js 14"/>
+  <img src="https://img.shields.io/badge/Claude_API-Haiku%20%7C%20Sonnet%20%7C%20Opus-8B5CF6?logo=anthropic&logoColor=white" alt="Claude API"/>
+  <img src="https://img.shields.io/badge/PostgreSQL-16-4169E1?logo=postgresql&logoColor=white" alt="PostgreSQL"/>
+  <img src="https://img.shields.io/badge/Redis-7-DC382D?logo=redis&logoColor=white" alt="Redis"/>
+  <img src="https://img.shields.io/badge/Docker-compose-2496ED?logo=docker&logoColor=white" alt="Docker"/>
+  <img src="https://img.shields.io/badge/Stripe-billing-635BFF?logo=stripe&logoColor=white" alt="Stripe"/>
+  <img src="https://img.shields.io/badge/license-MIT-green" alt="MIT License"/>
+</p>
 
 ---
 
-## 시작하기 (딱 3단계)
+## Overview
 
-### 1단계 — 코드 받기
+**DalkkakAI** is a full-stack AI platform that turns a natural-language startup description into a running, deployed web application — with monitoring, marketing, billing, and support baked in. The target user is a non-technical solo founder who has never opened a terminal.
 
-PowerShell을 열고 아래를 복사+붙여넣기 하세요.
+The name comes from the Korean word **딸깍** — the sound of a single click. That is the entire user experience: one click, and the complexity disappears into our backend.
 
-> PowerShell 여는 법: Windows 키 → "PowerShell" 검색 → 실행
+### How it differs from Devin / Cursor / Copilot Workspace
 
-```powershell
-cd C:\Sources
-git clone https://github.com/your-org/dalkkak.git
-cd dalkkak
+| | Devin / Cursor / Copilot | **DalkkakAI** |
+|---|---|---|
+| **Audience** | Developers writing code | Non-technical founders running a business |
+| **Scope** | Code generation + editing | Code + Deploy + Monitor + Market + Bill + Support |
+| **Session model** | Single sequential context | Parallel isolated sessions with git worktree branches |
+| **Cost control** | Flat subscription | Per-request AI cost routing: $0 ops first, Haiku ($0.005), Sonnet ($0.10), Opus ($0.80) |
+| **Output** | Code diffs | Running app at a live URL, with analytics dashboard |
+| **Terminal required** | Yes | Never — or optionally via in-browser terminal |
+
+---
+
+## Architecture
+
+### System Diagram
+
+```
+┌──────────────────────────────────────────────────────────────┐
+│                     USER'S BROWSER                            │
+│           Next.js 14 + Tailwind CSS + shadcn/ui              │
+│  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐        │
+│  │ Landing   │ │Dashboard │ │ Session  │ │ Terminal │        │
+│  │ Page      │ │ (i18n)   │ │ Detail   │ │ (xterm)  │        │
+│  └──────────┘ └──────────┘ └──────────┘ └──────────┘        │
+└──────────────────┬─────────────────────────┬─────────────────┘
+                   │ REST API                │ WebSocket
+                   ▼                         ▼
+┌──────────────────────────────────────────────────────────────┐
+│               FASTAPI BACKEND (async, Python 3.11)           │
+│  ┌────────┐ ┌──────────┐ ┌──────────┐ ┌───────────────────┐ │
+│  │ Auth   │ │ Startups │ │ Sessions │ │ AI Cost Router    │ │
+│  │ (JWT)  │ │ (CRUD)   │ │ (Queue)  │ │ (zero→haiku→     │ │
+│  │        │ │          │ │          │ │  sonnet→opus)     │ │
+│  └────────┘ └──────────┘ └──────────┘ └────────┬──────────┘ │
+│  ┌────────┐ ┌──────────┐ ┌──────────┐          │            │
+│  │Billing │ │ Deploy   │ │ Terminal │   ┌──────▼──────┐     │
+│  │(Stripe)│ │ Service  │ │ (PTY)   │   │ Agent       │     │
+│  └────────┘ └──────────┘ └──────────┘   │ Executor    │     │
+│  ┌────────────────────────────────────┐  │ (ReAct loop)│     │
+│  │ WebSocket Hub — real-time events   │  └──────┬──────┘     │
+│  └────────────────────────────────────┘         │            │
+└────────┬──────────┬──────────┬──────────┬───────┤────────────┘
+         │          │          │          │       │
+         ▼          ▼          ▼          ▼       ▼
+    ┌────────┐ ┌────────┐ ┌────────┐ ┌──────┐ ┌────────┐
+    │Postgres│ │ Redis  │ │ Docker │ │Claude│ │ GitHub │
+    │   16   │ │   7    │ │ Socket │ │ API  │ │  API   │
+    └────────┘ └────────┘ └────────┘ └──────┘ └────────┘
+```
+
+### Data Flow: User Request → Live App
+
+```
+User types: "Build me a restaurant review SaaS"
+  │
+  ▼
+Router Agent (Haiku, ~$0.002, <500ms)
+  → Classifies intent → "build_startup" → selects Opus
+  │
+  ▼
+Session Queue (concurrency-aware, plan-based limits)
+  → Free: 1 slot │ Starter: 2 │ Growth: 5 │ Scale: 10
+  │
+  ▼
+Git Worktree created (isolated branch + directory)
+  │
+  ▼
+Agent Executor (ReAct loop, max 30 iterations)
+  → Claude reads files → writes code → runs tests → repeats
+  → Tools: write_file, read_file, run_command, list_files, session_complete
+  → Streams progress via WebSocket → UI updates in real-time
+  │
+  ▼
+Auto-Test → pytest inside Docker container
+  │
+  ▼ (tests pass)
+Preview → Docker container launched, dynamic port assigned
+  → User clicks URL → sees running app in browser
+  │
+  ▼
+Merge → Deploy → Live at *.dalkkak.ai
 ```
 
 ---
 
-### 2단계 — 서버 시작
+## Key Features
 
-```powershell
+### Parallel AI Sessions (tmux-style)
+Multiple AI sessions run simultaneously, each in its own git worktree branch. A visual grid shows all sessions side by side — progress bars, file changes, test results, and cost tracking — all updating in real-time via WebSocket.
+
+### Dual Mode: Auto AI + Terminal
+- **Auto AI mode**: Describe what you want in plain language. The AI executor does everything.
+- **Terminal mode**: Full xterm.js terminal in the browser, backed by tmux + PTY. Use your own Claude Code subscription or any CLI tool. Sessions persist across page refreshes.
+
+### Docker Preview System
+One-click test launches the app in a Docker container with auto-detected stack (Node.js, Python/FastAPI, Next.js), dynamic port allocation, and hot-reload. Docker-in-Docker architecture: the API container creates preview containers on the host via socket mount.
+
+### AI Cost Router (the $0.001 gatekeeper)
+Every request passes through a hierarchical cost router before touching any AI model:
+1. **Zero-cost** — DB query, cached response, template, regex ($0)
+2. **Haiku** — classification, short answers, auto-replies (~$0.005)
+3. **Sonnet** — code generation, content, analysis (~$0.10)
+4. **Opus** — full startup build, architecture decisions (~$0.80)
+
+Result: ~$6.75 AI cost per active user/month at $49+ subscription = 86%+ gross margin.
+
+### Git Worktree Isolation
+Each session gets its own worktree directory and branch. No two sessions touch the same files. Module-based splitting (not feature-based) ensures clean parallel merges. Merge order respects dependency topology: core modules first, features second, frontend last.
+
+### CLAUDE.md Agent Sophistication
+An 8-layer agent governance system defined in `CLAUDE.md`:
+1. Prompt-level rules and constraints
+2. Tool-use boundaries per agent type
+3. Context budget management (Haiku: 2K tokens, Sonnet: 8K, Opus: 20K)
+4. Cost escalation policy (try cheap first, escalate on failure)
+5. Session ownership model (directory-level file boundaries)
+6. Error recovery protocol (retry → escalate → notify)
+7. Module-based parallel session rules (7 rules for zero-conflict merges)
+8. Agent-type specialization (7 distinct agent types with clear boundaries)
+
+### i18n (Korean / English)
+Full internationalization support. Korean for the domestic market, English for global reach.
+
+### Stripe Billing Integration
+Four-tier subscription model (Free → Starter → Growth → Scale) controlling AI budget allocation, concurrent session limits, and feature access. Stripe Checkout + webhook-driven plan updates.
+
+---
+
+## Technical Deep Dive
+
+### AI Agent Executor: ReAct Loop with Tool-Use
+
+The core engine runs Claude in a ReAct (Reason + Act) loop. Each iteration:
+
+```python
+# Simplified from backend/agents/executor.py
+class AgentExecutor:
+    async def run(self):
+        for iteration in range(MAX_ITERATIONS):  # max 30
+            if self.total_cost >= Decimal("5.0"):
+                return ExecutionResult(success=False, error="Cost limit")
+
+            response = await client.messages.create(
+                model="claude-sonnet-4-6",
+                messages=self.conversation,
+                tools=TOOL_DEFINITIONS,  # write_file, read_file, run_command, ...
+            )
+
+            for block in response.content:
+                if block.type == "tool_use":
+                    result = await self.tool_executor.execute(block.name, block.input)
+                    if block.name == "session_complete":
+                        return ExecutionResult(success=True)
+```
+
+Safety limits: $5 max cost per session, 30-minute timeout, loop detection (3 identical outputs → auto-pause).
+
+### Session Queue: Concurrency-Aware, Plan-Based
+
+```
+Free plan:    1 concurrent session   → sequential execution
+Starter:      2 concurrent sessions  → light parallelism
+Growth:       5 concurrent sessions  → full parallel builds
+Scale:        10 concurrent sessions → enterprise throughput
+```
+
+The queue worker polls every 10 seconds, dispatches sessions by priority (1-10), and auto-starts the next queued session when a slot opens. Per-session cost tracking with warnings at $2 and hard pause at $5.
+
+### Preview System: Docker-in-Docker with Dynamic Ports
+
+```
+User clicks "Test"
+  → POST /api/sessions/{id}/preview
+  → detect_startup_type(worktree)        # package.json? main.py? next.config?
+  → find_free_port()                      # OS-assigned via socket.bind(("", 0))
+  → docker run --detach                   # on HOST via mounted docker.sock
+      --publish {port}:{container_port}
+      --volume {worktree}:/app
+      {image} "npm install && npm start"
+  → return http://localhost:{port}
+```
+
+Hot-reload: Node.js uses `--watch`, FastAPI uses `--reload`. File changes in the worktree are immediately reflected.
+
+### WebSocket Hub: Real-Time Session Streaming
+
+The hub broadcasts granular events per startup:
+
+```
+ws://localhost:8000/ws/sessions/{startup_id}
+
+Events: session.progress   → { session_id, progress: 45, message: "Writing tests..." }
+        session.file_change → { session_id, file_path, change_type }
+        session.completed   → { session_id, summary }
+        session.error       → { session_id, error_message }
+```
+
+A separate terminal WebSocket (`/ws/terminal/{session_id}`) provides full PTY forwarding: `Browser (xterm.js) ←→ WebSocket ←→ FastAPI ←→ PTY ←→ tmux ←→ bash`.
+
+### 7 Specialized Agent Types
+
+| Agent | Model | Purpose | File Ownership |
+|-------|-------|---------|----------------|
+| **Router** | Haiku | Classify every request (<500ms, <$0.002) | None (stateless) |
+| **Build** | Opus→Sonnet | Generate complete startup from description | All files (initial build) |
+| **Feature** | Sonnet | Add features to existing codebase | Scoped to feature directory |
+| **Fix** | Sonnet→Opus | Diagnose and repair bugs | Scoped to affected files |
+| **Marketing** | Haiku/Sonnet | Blog, SEO, ads, email campaigns | Marketing content only |
+| **Support** | Haiku + RAG | Auto-resolve customer tickets | Knowledge base only |
+| **Advisor** | Haiku/Sonnet | Business metrics and insights | Read-only (never writes) |
+
+Agents do **not** communicate directly. All coordination flows through the shared database.
+
+---
+
+## Tech Stack
+
+| Layer | Technology | Purpose |
+|-------|-----------|---------|
+| **Frontend** | Next.js 14 (App Router) + Tailwind CSS + shadcn/ui | Dashboard, session UI, landing page |
+| **Backend** | Python 3.11 + FastAPI (async) + Pydantic v2 | REST API, WebSocket hub, session management |
+| **AI Engine** | Claude API (Haiku / Sonnet / Opus) + LangGraph | Agent executor, cost routing, tool-use loop |
+| **Database** | PostgreSQL 16 (Supabase) + SQLAlchemy 2.0 async | Users, startups, sessions, analytics |
+| **Cache/Queue** | Redis 7 (Upstash) | Session queue, pub/sub, rate limiting, response cache |
+| **Migrations** | Alembic | Auto-run on startup, never touch schema directly |
+| **Terminal** | xterm.js + tmux + PTY | In-browser terminal with session persistence |
+| **Preview** | Docker-in-Docker (socket mount) | Dynamic container launch for app testing |
+| **Payments** | Stripe (Checkout + Webhooks) | Subscription billing, plan management |
+| **Storage** | Cloudflare R2 | Generated code, build artifacts, uploads |
+| **Vectors** | Qdrant Cloud | RAG knowledge base for support bot |
+| **Git** | Git worktrees + GitHub API | Per-session branch isolation, auto-commit |
+| **Email** | Resend | Transactional and marketing emails |
+| **Monitoring** | Sentry + PostHog | Error tracking, analytics events |
+| **DNS** | Cloudflare | Wildcard *.dalkkak.ai routing |
+| **Deployment** | Railway + Docker Compose (dev) | One-command local dev, one-click production deploy |
+
+---
+
+## Getting Started
+
+### Prerequisites
+
+- **Docker Desktop** — runs the entire stack (API, PostgreSQL, Redis) in containers
+- **Git** — for cloning and worktree management
+- **Node.js 18+** — for frontend development (optional if only running backend)
+
+### Quick Start
+
+```bash
+# 1. Clone the repository
+git clone https://github.com/your-org/dalkkak-ai.git
+cd dalkkak-ai
+
+# 2. Start the full stack (API + PostgreSQL + Redis)
 docker-compose up
+
+# 3. Verify
+curl http://localhost:8000/health    # → { "status": "ok" }
+open http://localhost:8000/docs      # → Swagger UI with all endpoints
 ```
 
-처음 실행하면 약 2-3분 걸립니다 (이미지 다운로드).
-두 번째부터는 10초 안에 시작됩니다.
+First run takes ~2-3 minutes (image download). Subsequent starts: ~10 seconds.
 
-아래 메시지가 보이면 성공입니다:
+### Environment Variables
 
+```env
+# Required
+DATABASE_URL=postgresql+asyncpg://dalkkak:dalkkak@db:5432/dalkkak
+REDIS_URL=redis://redis:6379
+
+# Optional — AI features require this
+ANTHROPIC_API_KEY=sk-ant-...
+
+# Optional — billing
+STRIPE_SECRET_KEY=sk_test_...
+STRIPE_WEBHOOK_SECRET=whsec_...
+
+# Optional — deployment
+GITHUB_TOKEN=ghp_...
+RAILWAY_TOKEN=...
 ```
-✅ DalkkakAI API starting — env=development
-✅ Migrations complete
-✅ Session queue worker started
-```
 
----
+The server, database, and tests all work without an API key. AI agent execution requires `ANTHROPIC_API_KEY`.
 
-### 3단계 — 확인
+### Running Tests
 
-브라우저에서 열어보세요:
-
-| 주소 | 무엇인가 |
-|---|---|
-| http://localhost:8000/health | 서버 상태 확인 (OK 뜨면 정상) |
-| http://localhost:8000/docs | 전체 API 목록 (직접 테스트 가능) |
-
----
-
-## 개발할 때 자주 쓰는 명령어
-
-```powershell
-# 서버 시작
-docker-compose up
-
-# 서버 종료
-Ctrl + C  →  docker-compose down
-
-# 전체 테스트 자동 실행 (결과 보고 자동 종료)
+```bash
+# Run the full test suite inside Docker
 docker-compose --profile test up --abort-on-container-exit
 
-# DB 초기화 (처음부터 다시 시작)
-docker-compose down -v  →  docker-compose up
-
-# 실행 중인 서버 로그 보기
-docker-compose logs -f api
+# Or locally with pytest
+pytest tests/ -v --asyncio-mode=auto
 ```
 
 ---
 
-## AI 기능을 쓰고 싶다면 (선택사항)
+## Project Structure
 
-1. [console.anthropic.com](https://console.anthropic.com) → 계정 만들기 → API Keys → Create Key → 복사
-2. 프로젝트 폴더의 `.env` 파일을 메모장으로 열기
-3. `ANTHROPIC_API_KEY=` 뒤에 붙여넣기 → 저장
-4. `docker-compose down && docker-compose up` 재시작
-
-API 키 없어도 서버, DB, 테스트는 전부 정상 동작합니다.
+```
+dalkkak-ai/
+├── backend/
+│   ├── main.py                 # FastAPI entry point + lifespan (auto-migrate)
+│   ├── config.py               # Environment configuration
+│   ├── database.py             # Async SQLAlchemy engine + session
+│   ├── auth/                   # JWT signup/login/refresh
+│   ├── startups/               # Startup CRUD (one user → many startups)
+│   ├── sessions/               # Session lifecycle, queue worker, preview
+│   ├── agents/                 # AI executor, cost router, 7 agent types
+│   ├── billing/                # Stripe checkout + webhook handlers
+│   ├── deploy/                 # Railway/GitHub deployment service
+│   ├── terminal/               # PTY + tmux WebSocket bridge
+│   ├── websocket/              # Real-time event hub
+│   └── models/                 # SQLAlchemy ORM models
+├── frontend/
+│   ├── app/                    # Next.js 14 App Router
+│   │   ├── (marketing)/        # Landing page (no sidebar)
+│   │   ├── (auth)/             # Login / register
+│   │   └── (dashboard)/        # Session grid, startup detail
+│   ├── components/             # Terminal.tsx, SessionCard, FilesViewer
+│   └── lib/                    # API client, WebSocket helpers
+├── docs/                       # 15 spec docs (architecture, agents, cost, sessions, ...)
+├── tests/                      # pytest + asyncio test suite
+├── alembic/                    # Database migrations
+├── docker-compose.yml          # Full stack: api + postgres + redis
+├── Dockerfile                  # Multi-stage Python build
+├── CLAUDE.md                   # AI agent governance rules (8-layer system)
+└── logs/                       # Learning logs, English corrections, troubleshooting
+```
 
 ---
 
-## 기술 스택 (전체 로드맵)
+## Roadmap
 
-### Phase 1 — 지금 (Month 0-6)
+### Phase 1 — Ship Fast (Current, Month 0-3) — Agent Level 7
+> Launch MVP, first paying customers. Target: 50 users, ~5M KRW/month.
 
-```
-Frontend:   Next.js 14 + Tailwind + shadcn/ui  (Vercel)
-Backend:    Python FastAPI + LangGraph          (Railway)
-Database:   PostgreSQL + Redis                  (Supabase + Upstash)
-AI:         Claude API (Haiku / Sonnet / Opus)
-```
+- [x] Auth (signup, login, JWT, token refresh)
+- [x] Startup CRUD with git repo initialization
+- [x] AI Executor (Claude tool-use ReAct loop)
+- [x] Multi-session queue with plan-based concurrency
+- [x] Git worktree isolation per session
+- [x] Auto-test (pytest inside Docker)
+- [x] Docker preview with hot-reload
+- [x] Real-time WebSocket streaming
+- [x] AI cost router (zero → Haiku → Sonnet → Opus)
+- [x] Web terminal (xterm.js + tmux + PTY)
+- [x] Files tab (code viewer)
+- [x] Chat → AI re-execution
+- [ ] Merge (session → main branch)
+- [ ] Deploy integration (Railway / Vercel)
+- [ ] Stripe billing
+- [ ] Landing page
+- [ ] Beta launch
 
-### Phase 2 — 스케일 (Month 6-12)
+### Phase 2 — Differentiate (Month 3-6) — Agent Level 8-9
+> Self-improving agents, domain templates, marketing/support automation.
 
-성능 병목이 측정되는 시점에 Go로 분리합니다.
+- Self-improving Agent (failure → auto-analyze → fix → retry)
+- Domain templates (manufacturing, medical, finance, e-commerce)
+- GitHub auto-connect (private repo + push)
+- Analytics dashboard (revenue, users, funnel)
+- Marketing Agent (landing page, SEO, email sequences)
+- Support Agent (RAG knowledge base, ticket auto-resolution)
 
-```
-API Gateway:      Go (Fiber)           ← 40K+ req/sec
-WebSocket Hub:    Go (goroutines)      ← 100K+ 동시 연결
-Session Manager:  Go (os/exec)         ← 100+ 워크트리 동시 실행
-Deploy Service:   Go (net/http)        ← 빠른 Railway API 호출
-Monitor Service:  Go (goroutines)      ← 500+ 스타트업 상태 감시
+### Phase 3 — Ontology + Human-AI Collaboration (Month 6-12) — Agent Level 10
+> Enterprise-grade intelligence. Knowledge graphs power agent reasoning.
 
-AI Engine:        Python (영구)        ← LangGraph는 Python only
-AI Router:        Python (영구)        ← Claude SDK Python-first
-Content/Support:  Python (영구)        ← AI 생태계 전부 Python
-```
+- Knowledge Graph auto-construction (Neo4j)
+- Ontology-powered Agent reasoning
+- Human-AI collaborative workflow (AI asks human when uncertain)
+- Agentic RAG pipeline (Qdrant + ontology-guided retrieval)
+- Text2SQL Agent, LLM-as-a-Judge evaluation, hallucination detection
 
-Go ↔ Python 통신: Redis 큐 (Phase 2 초기) → gRPC (스트리밍 필요 시)
+### Phase 4 — Agent Society (Month 12+) — Agent Level 11
+> Hundreds of agents, autonomous organization and disbanding.
 
----
-
-## 지금 만들어진 것 / 안 만들어진 것
-
-### ✅ 완성 (Backend Phase 1)
-
-| 모듈 | 설명 |
-|---|---|
-| 인증 (Auth) | 회원가입, 로그인, JWT, 토큰 갱신 |
-| 스타트업 CRUD | 생성, 조회, 수정, 삭제 |
-| AI 에이전트 엔진 | Claude tool-use loop, 파일 작성, 테스트 실행 |
-| 멀티 세션 큐 | Plan별 동시 실행 제한 (Free=1, Starter=2...) |
-| Git Worktree 격리 | 세션마다 독립 브랜치, 충돌 없는 병렬 작업 |
-| 자동 테스트 | 작업 완료 → pytest 자동 실행 → 결과 스트리밍 |
-| 자동 프리뷰 | 테스트 통과 → Docker로 미리보기 URL 자동 생성 |
-| 실시간 WebSocket | 진행상황, 파일 변경, 채팅 실시간 스트리밍 |
-| AI Cost Router | 비용 최적 모델 자동 선택 (Zero-cost → Haiku → Sonnet → Opus) |
-| Docker 자동화 | `docker-compose up` 한 번으로 전체 스택 실행 |
-
-### ⏳ 다음 단계
-
-| 모듈 | 단계 | 설명 |
-|---|---|---|
-| **프론트엔드** | Day 2 | Next.js 대시보드, 커맨드바, 실시간 UI |
-| Deploy 모듈 | Day 3 | Railway API 연동, 자동 배포 |
-| Analytics 모듈 | Phase 1 후반 | 메트릭, 매출, 퍼널 |
-| Marketing 모듈 | Phase 1 후반 | AI 광고/블로그 생성 |
-| Support 모듈 | Phase 1 후반 | AI 티켓 자동 처리 |
-| Billing 모듈 | Phase 1 후반 | Stripe 구독 |
-| **Go 서비스** | Phase 2 | Gateway, WebSocket, Session Mgr |
+- Market-economy agent coordination (auction/negotiation)
+- Cross-domain transfer learning
+- Self-evolving architecture
+- Target: 10B KRW/year revenue
 
 ---
 
-## 문제가 생겼을 때
+## Philosophy
 
-**Docker가 안 켜진다**
-→ Docker Desktop을 먼저 실행하세요 (작업표시줄에서 🐋 확인)
+> **"복잡함은 우리가 삼킨다. 유저는 딸깍만 한다."**
+>
+> *"We swallow the complexity. Users just click."*
 
-**포트 충돌 오류 (`port is already in use`)**
-```powershell
-docker-compose down
-docker-compose up
+Every architectural decision in DalkkakAI traces back to this principle. The AI cost router exists so the user never thinks about model selection. Git worktrees exist so the user never thinks about branches. Docker preview exists so the user never thinks about deployment. The entire system is designed so that a founder who has never opened a terminal can go from idea to live product with paying customers — in one click.
+
+---
+
+## API Contract
+
+```
+Success:    { "ok": true,  "data": { ... } }
+Error:      { "ok": false, "error": "Human-readable message", "code": "SNAKE_CASE" }
+Pagination: ?page=1&limit=20 → { "data": [], "total": N, "page": 1 }
+
+All IDs:        UUID v4
+All timestamps: ISO 8601 UTC
+Auth:           Bearer token (JWT, 24h expiry)
+Rate limits:    100 req/min (authenticated), 10 req/min (public)
 ```
 
-**DB 오류 (`connection refused`)**
-→ DB가 아직 시작 중입니다. 30초 기다리면 자동으로 해결됩니다.
+---
 
-**완전히 초기화하고 싶을 때**
-```powershell
-docker-compose down -v
-docker-compose up
-```
+## License
+
+MIT
+
+---
+
+<p align="center">
+  <em>Built solo with Claude Code. Designed for founders who build with one click.</em>
+</p>
