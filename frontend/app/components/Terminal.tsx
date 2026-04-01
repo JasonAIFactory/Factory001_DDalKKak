@@ -6,6 +6,9 @@ import { useEffect, useRef, useState } from "react";
  * Web terminal — real PTY shell via WebSocket.
  * Identical to iTerm2 / native terminal experience.
  * Type `claude` to start Claude Code with your own account.
+ *
+ * Features: ping/pong heartbeat, auto-reconnect on disconnect,
+ * mouse wheel scroll (scrollback=10000), flex-based full-height layout.
  */
 export default function Terminal({
   className = "",
@@ -23,17 +26,109 @@ export default function Terminal({
   const [connected, setConnected] = useState(false);
   const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number } | null>(null);
 
+  /** Track reconnect state across the async closure. */
+  const reconnectCountRef = useRef(0);
+  const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const connectWsRef = useRef<(() => void) | null>(null);
+  const unmountedRef = useRef(false);
+  const MAX_RECONNECT_RETRIES = 5;
+  const RECONNECT_INTERVAL_MS = 3000;
+
   useEffect(() => {
     console.log("[Terminal] mounting, ref:", !!termRef.current, "initialized:", initialized.current);
     if (!termRef.current || initialized.current) return;
     initialized.current = true;
+    unmountedRef.current = false;
     console.log("[Terminal] initializing xterm + websocket");
 
-    let ws: WebSocket | null = null;
     let term: any = null;
     let fitAddon: any = null;
     let resizeObserver: ResizeObserver | null = null;
     let pingInterval: ReturnType<typeof setInterval> | null = null;
+
+    /** Build WebSocket URL from env. */
+    const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+    const wsUrl = apiUrl.replace(/^http/, "ws") + `/ws/terminal/${sessionId}`;
+
+    /**
+     * Connect (or reconnect) the WebSocket to the backend PTY.
+     * Reuses the existing xterm instance — only the WS is replaced.
+     */
+    const connectWs = () => {
+      if (unmountedRef.current) return;
+
+      console.log("[Terminal] connecting to:", wsUrl);
+      const ws = new WebSocket(wsUrl);
+      ws.binaryType = "arraybuffer";
+      wsRef.current = ws;
+
+      ws.onopen = () => {
+        setConnected(true);
+        reconnectCountRef.current = 0; // reset on success
+        if (term) term.focus();
+        // Sync terminal size
+        ws.send(JSON.stringify({
+          type: "resize",
+          cols: term?.cols ?? 120,
+          rows: term?.rows ?? 30,
+        }));
+        // Keep-alive ping every 25s to prevent idle disconnect
+        if (pingInterval) clearInterval(pingInterval);
+        pingInterval = setInterval(() => {
+          if (ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({ type: "ping" }));
+          } else {
+            if (pingInterval) { clearInterval(pingInterval); pingInterval = null; }
+          }
+        }, 25000);
+      };
+
+      ws.onmessage = (event: MessageEvent) => {
+        if (!term) return;
+        if (event.data instanceof ArrayBuffer) {
+          term.write(new Uint8Array(event.data));
+        } else {
+          // Ignore pong heartbeat responses — they just keep the connection alive
+          try {
+            const parsed = JSON.parse(event.data);
+            if (parsed.type === "pong") return;
+          } catch {
+            // Not JSON — normal terminal output, write it
+          }
+          term.write(event.data);
+        }
+      };
+
+      ws.onclose = () => {
+        setConnected(false);
+        if (pingInterval) { clearInterval(pingInterval); pingInterval = null; }
+
+        if (unmountedRef.current) return;
+
+        // Auto-reconnect logic
+        if (reconnectCountRef.current < MAX_RECONNECT_RETRIES) {
+          reconnectCountRef.current += 1;
+          if (term) {
+            term.write(
+              `\r\n\x1b[33m[Reconnecting... attempt ${reconnectCountRef.current}/${MAX_RECONNECT_RETRIES}]\x1b[0m\r\n`
+            );
+          }
+          reconnectTimerRef.current = setTimeout(connectWs, RECONNECT_INTERVAL_MS);
+        } else {
+          if (term) {
+            term.write(
+              "\r\n\x1b[31m[Connection failed. Click terminal to reconnect]\x1b[0m\r\n"
+            );
+          }
+        }
+      };
+
+      ws.onerror = () => {
+        // onclose fires after onerror — reconnect handled there
+        setConnected(false);
+      };
+    };
+    connectWsRef.current = connectWs;
 
     (async () => {
       const { Terminal: XTerm } = await import("@xterm/xterm");
@@ -42,7 +137,7 @@ export default function Terminal({
       // @ts-expect-error — CSS import works at runtime but TS can't resolve it
       await import("@xterm/xterm/css/xterm.css");
 
-      if (!termRef.current) return;
+      if (!termRef.current || unmountedRef.current) return;
 
       term = new XTerm({
         cursorBlink: true,
@@ -96,58 +191,8 @@ export default function Terminal({
       setTimeout(doFit, 300);
       setTimeout(doFit, 600);
 
-      // WebSocket to backend PTY
-      const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
-      const wsUrl = apiUrl.replace(/^http/, "ws") + `/ws/terminal/${sessionId}`;
-      console.log("[Terminal] connecting to:", wsUrl);
-      ws = new WebSocket(wsUrl);
-      ws.binaryType = "arraybuffer";
-      wsRef.current = ws;
-
-      ws.onopen = () => {
-        setConnected(true);
-        term.focus();
-        // Sync terminal size
-        ws!.send(JSON.stringify({
-          type: "resize",
-          cols: term.cols,
-          rows: term.rows,
-        }));
-        // Keep-alive ping every 25s to prevent idle disconnect
-        pingInterval = setInterval(() => {
-          if (ws && ws.readyState === WebSocket.OPEN) {
-            ws.send(JSON.stringify({ type: "ping" }));
-          } else {
-            if (pingInterval) clearInterval(pingInterval);
-            pingInterval = null;
-          }
-        }, 25000);
-      };
-
-      ws.onmessage = (event: MessageEvent) => {
-        if (event.data instanceof ArrayBuffer) {
-          term.write(new Uint8Array(event.data));
-        } else {
-          // Ignore pong heartbeat responses — they just keep the connection alive
-          try {
-            const parsed = JSON.parse(event.data);
-            if (parsed.type === "pong") return;
-          } catch {
-            // Not JSON — normal terminal output, write it
-          }
-          term.write(event.data);
-        }
-      };
-
-      ws.onclose = () => {
-        setConnected(false);
-        if (pingInterval) { clearInterval(pingInterval); pingInterval = null; }
-        term.write("\r\n\x1b[31m[Disconnected]\x1b[0m\r\n");
-      };
-
-      ws.onerror = () => {
-        setConnected(false);
-      };
+      // Initial WebSocket connection
+      connectWs();
 
       // Copy on select (Ctrl+C copies when text selected, sends SIGINT otherwise)
       term.onSelectionChange(() => {
@@ -161,8 +206,9 @@ export default function Terminal({
       term.attachCustomKeyEventHandler((e: KeyboardEvent) => {
         if (e.type === "keydown" && e.ctrlKey && e.key === "v") {
           navigator.clipboard.readText().then((text) => {
-            if (ws && ws.readyState === WebSocket.OPEN) {
-              ws.send(new TextEncoder().encode(text));
+            const currentWs = wsRef.current;
+            if (currentWs && currentWs.readyState === WebSocket.OPEN) {
+              currentWs.send(new TextEncoder().encode(text));
             }
           }).catch(() => {});
           return false;
@@ -178,20 +224,22 @@ export default function Terminal({
 
       // Send keystrokes as binary
       term.onData((data: string) => {
-        if (ws && ws.readyState === WebSocket.OPEN) {
+        const currentWs = wsRef.current;
+        if (currentWs && currentWs.readyState === WebSocket.OPEN) {
           const bytes = new TextEncoder().encode(data);
-          ws.send(bytes);
+          currentWs.send(bytes);
         }
       });
 
       // Send binary sequences (Ctrl+C, arrow keys, etc.)
       term.onBinary((data: string) => {
-        if (ws && ws.readyState === WebSocket.OPEN) {
+        const currentWs = wsRef.current;
+        if (currentWs && currentWs.readyState === WebSocket.OPEN) {
           const buffer = new Uint8Array(data.length);
           for (let i = 0; i < data.length; i++) {
             buffer[i] = data.charCodeAt(i);
           }
-          ws.send(buffer);
+          currentWs.send(buffer);
         }
       });
 
@@ -202,8 +250,9 @@ export default function Terminal({
         resizeTimer = setTimeout(() => {
           if (!fitAddon || !term) return;
           try { fitAddon.fit(); } catch {}
-          if (ws && ws.readyState === WebSocket.OPEN) {
-            ws.send(JSON.stringify({
+          const currentWs = wsRef.current;
+          if (currentWs && currentWs.readyState === WebSocket.OPEN) {
+            currentWs.send(JSON.stringify({
               type: "resize",
               cols: term.cols,
               rows: term.rows,
@@ -219,9 +268,12 @@ export default function Terminal({
     })();
 
     return () => {
+      unmountedRef.current = true;
       if (pingInterval) { clearInterval(pingInterval); pingInterval = null; }
+      if (reconnectTimerRef.current) { clearTimeout(reconnectTimerRef.current); reconnectTimerRef.current = null; }
       if (resizeObserver) resizeObserver.disconnect();
-      if (ws && ws.readyState === WebSocket.OPEN) ws.close();
+      const currentWs = wsRef.current;
+      if (currentWs && currentWs.readyState === WebSocket.OPEN) currentWs.close();
       if (term) term.dispose();
       wsRef.current = null;
       initialized.current = false;
@@ -252,16 +304,28 @@ export default function Terminal({
         </span>
       </div>
 
-      {/* Terminal body — fills all remaining space via flex */}
+      {/* Terminal body — fills all remaining space via flex.
+          minHeight:0 is critical so flex-1 can shrink below content height.
+          No overflow:hidden — xterm.js manages its own viewport scrolling. */}
       <div
         ref={termRef}
-        className="flex-1 overflow-hidden"
-        style={{ padding: "8px 4px 4px 8px", minHeight: 0, position: "relative" }}
+        className="flex-1"
+        style={{ padding: "8px 4px 4px 8px", minHeight: 0 }}
         onContextMenu={(e) => {
           e.preventDefault();
           setCtxMenu({ x: e.clientX, y: e.clientY });
         }}
-        onClick={() => ctxMenu && setCtxMenu(null)}
+        onClick={() => {
+          if (ctxMenu) { setCtxMenu(null); return; }
+          // Click-to-reconnect after max retries exhausted
+          if (!connected && reconnectCountRef.current >= MAX_RECONNECT_RETRIES) {
+            reconnectCountRef.current = 0;
+            if (xtermRef.current) {
+              xtermRef.current.write("\r\n\x1b[33m[Reconnecting...]\x1b[0m\r\n");
+            }
+            if (connectWsRef.current) connectWsRef.current();
+          }
+        }}
       />
 
       {/* Custom context menu */}

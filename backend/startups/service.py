@@ -94,11 +94,13 @@ When your work is complete, you MUST create a `dalkkak.json` file in the project
 {{
   "start": "<command to start the server>",
   "port": <port number the server listens on>,
-  "language": "<python|nodejs|go|java|ruby|rust>"
+  "language": "<python|nodejs|go|java|ruby|rust>",
+  "install": "<command to install dependencies>"
 }}
 ```
-Example for Flask: `{{"start": "python app.py", "port": 5000, "language": "python"}}`
-Example for Express: `{{"start": "node server.js", "port": 3000, "language": "nodejs"}}`
+Example for Flask: `{{"start": "python app.py", "port": 5000, "language": "python", "install": "pip install -r requirements.txt"}}`
+Example for Express: `{{"start": "node server.js", "port": 3000, "language": "nodejs", "install": "npm install"}}`
+Example for FastAPI: `{{"start": "uvicorn app:app --host 0.0.0.0 --port 8000", "port": 8000, "language": "python", "install": "pip install -r requirements.txt"}}`
 This file is required for the Test button to work. Without it, the app cannot be previewed.
 
 ## RULE 2 — Server Binding
@@ -136,7 +138,7 @@ Check existing files before creating new ones — build on what exists.
     shared_rules = f"""Project: {name}
 
 Rules:
-1. On completion, create dalkkak.json in project root with: start (command), port (number), language (python|nodejs|go|java|ruby|rust)
+1. On completion, create dalkkak.json in project root with: start (command), port (number), language (python|nodejs|go|java|ruby|rust), install (dependency install command)
 2. Bind servers to 0.0.0.0, never localhost. Use PORT env var if available.
 3. Include /health endpoint returning {{"ok": true}}
 4. Never hardcode secrets. Use .env file + .gitignore.

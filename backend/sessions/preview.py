@@ -17,10 +17,13 @@ Called by: sessions/queue.py after test_runner passes
 from __future__ import annotations
 
 import asyncio
+import json as _json
 import logging
+import os
+import re
 import socket
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
@@ -41,6 +44,60 @@ class PreviewResult:
     port: int | None = None
     container_name: str | None = None
     error: str | None = None
+
+
+@dataclass
+class AppDetection:
+    """Everything needed to run a detected app in Docker."""
+
+    app_type: str
+    start_cmd: str
+    container_port: int
+    image: str
+    install_cmd: str = ""
+    language: str = "python"
+
+
+# Docker base image per language
+_LANGUAGE_IMAGES: dict[str, str] = {
+    "python": "python:3.11-slim",
+    "node": "node:20-slim",
+    "nodejs": "node:20-slim",
+    "javascript": "node:20-slim",
+    "go": "golang:1.22-alpine",
+    "golang": "golang:1.22-alpine",
+    "ruby": "ruby:3.3-slim",
+    "java": "eclipse-temurin:21-jre",
+    "rust": "rust:1.77-slim",
+    "static": "python:3.11-slim",
+}
+
+# Default ports per language / framework
+_DEFAULT_PORTS: dict[str, int] = {
+    "python": 8000,
+    "flask": 5000,
+    "fastapi": 8000,
+    "django": 8000,
+    "node": 3000,
+    "nodejs": 3000,
+    "javascript": 3000,
+    "nextjs": 3000,
+    "go": 8080,
+    "golang": 8080,
+    "ruby": 3000,
+    "java": 8080,
+    "rust": 8080,
+    "static": 8080,
+}
+
+# Regex patterns for port detection in source files
+_PORT_PATTERNS: list[re.Pattern[str]] = [
+    re.compile(r"""(?:port|PORT)\s*[=:]\s*(\d{2,5})"""),
+    re.compile(r"""\.listen\(\s*(\d{2,5})"""),
+    re.compile(r""":(\d{2,5})['")\s]"""),
+    re.compile(r"""--port[= ](\d{2,5})"""),
+    re.compile(r"""-p\s+(\d{2,5})"""),
+]
 
 
 def _find_free_port() -> int:
@@ -151,58 +208,276 @@ async def _create_preview_db_schema(session_id: str) -> str:
     return f"{base_url}?options=-csearch_path={schema_name}"
 
 
-async def _detect_startup_type(worktree_path: str) -> str:
+def _detect_port(worktree_path: str, app_type: str) -> int:
+    """
+    Scan code files to auto-detect the port the app listens on.
+
+    Search order:
+      1. .env files for PORT=
+      2. Source files for common port patterns (listen, PORT, etc.)
+      3. Fall back to default port for the detected app type
+    """
+    path = Path(worktree_path)
+
+    # 1. Check .env files for PORT=
+    for env_file in (".env", ".env.local", ".env.development"):
+        env_path = path / env_file
+        if env_path.exists():
+            try:
+                for line in env_path.read_text(errors="ignore").splitlines():
+                    line = line.strip()
+                    if line.startswith("PORT="):
+                        val = line.split("=", 1)[1].strip().strip('"').strip("'")
+                        if val.isdigit() and 1024 <= int(val) <= 65535:
+                            return int(val)
+            except Exception:
+                continue
+
+    # 2. Scan source files for port patterns
+    extensions = ("*.py", "*.js", "*.ts", "*.jsx", "*.tsx", "*.go", "*.rb")
+    found_ports: list[int] = []
+    for ext in extensions:
+        for src_file in path.glob(ext):
+            try:
+                content = src_file.read_text(errors="ignore")[:8192]
+                for pattern in _PORT_PATTERNS:
+                    for match in pattern.finditer(content):
+                        port_val = int(match.group(1))
+                        if 1024 <= port_val <= 65535:
+                            found_ports.append(port_val)
+            except Exception:
+                continue
+    if found_ports:
+        # Most common port wins (in case multiple files mention different ports)
+        return max(set(found_ports), key=found_ports.count)
+
+    # 3. Default port for app type
+    return _DEFAULT_PORTS.get(app_type, 8000)
+
+
+def _detect_python_framework(worktree: Path) -> tuple[str, str]:
+    """
+    Scan Python files to detect the web framework and entry point.
+
+    Returns (framework_name, entry_filename).
+    framework_name is one of: 'fastapi', 'flask', 'django', 'python'.
+    """
+    py_files = list(worktree.glob("*.py"))
+    framework = "python"
+    entry = None
+
+    # Priority: app.py / main.py / server.py — check these first
+    priority_names = ["app.py", "main.py", "server.py", "run.py", "wsgi.py"]
+    priority_files = [worktree / n for n in priority_names if (worktree / n).exists()]
+    scan_order = priority_files + [f for f in py_files if f not in priority_files]
+
+    for f in scan_order:
+        try:
+            content = f.read_text(errors="ignore")[:8192]
+            if "FastAPI(" in content or "fastapi" in content.lower():
+                framework = "fastapi"
+                entry = f.name
+                break
+            if "Flask(" in content or "flask" in content.lower():
+                framework = "flask"
+                entry = f.name
+                break
+            if "django" in content.lower():
+                framework = "django"
+                entry = f.name
+                break
+            if "app.run(" in content or "uvicorn" in content:
+                entry = f.name
+                break
+        except Exception:
+            continue
+
+    if not entry and py_files:
+        # Fall back to first priority file or first .py file
+        if priority_files:
+            entry = priority_files[0].name
+        else:
+            entry = py_files[0].name
+
+    return framework, entry or "app.py"
+
+
+def _image_for_language(language: str) -> str:
+    """Return the Docker base image for a given language."""
+    return _LANGUAGE_IMAGES.get(language, "python:3.11-slim")
+
+
+async def _detect_app(worktree_path: str) -> AppDetection:
     """
     Detect what kind of app is in the worktree and how to run it.
 
-    Priority order:
+    Priority order (first match wins):
       1. dalkkak.json — explicit config (always wins)
       2. Procfile — industry standard
-      3. Dockerfile — build and run
-      4. package.json — Node.js (check scripts.start)
-      5. requirements.txt + *.py — Python (find server file)
-      6. index.html — static site
-      7. unknown — best guess
+      3. Dockerfile — docker build and run
+      4. package.json — Node.js (check scripts.start, detect Next.js)
+      5. requirements.txt + *.py — Python (scan for Flask/FastAPI/Django)
+      6. index.html — static site (python http.server)
+      7. unknown — fallback with helpful error message
     """
-    import json as _json
-
     path = Path(worktree_path)
 
-    # 1. dalkkak.json — explicit config always wins
+    # ── Priority 1: dalkkak.json (explicit config, always wins) ──
     dalkkak_conf = path / "dalkkak.json"
     if dalkkak_conf.exists():
-        return "dalkkak"
+        try:
+            conf = _json.loads(dalkkak_conf.read_text(encoding="utf-8"))
+        except Exception as exc:
+            logger.warning("Invalid dalkkak.json: %s", exc)
+            conf = {}
 
-    # 2. Procfile
-    if (path / "Procfile").exists():
-        return "procfile"
+        lang = conf.get("language", "python")
+        start = conf.get("start", "")
+        port = conf.get("port", _DEFAULT_PORTS.get(lang, 8000))
+        install = conf.get("install", "")
 
-    # 3. Dockerfile
+        if not start:
+            # dalkkak.json exists but no start command — fall through to auto-detect
+            logger.warning("dalkkak.json has no 'start' field, falling through")
+        else:
+            return AppDetection(
+                app_type="dalkkak",
+                start_cmd=start,
+                container_port=port,
+                image=_image_for_language(lang),
+                install_cmd=install,
+                language=lang,
+            )
+
+    # ── Priority 2: Procfile ──
+    procfile_path = path / "Procfile"
+    if procfile_path.exists():
+        try:
+            procfile_text = procfile_path.read_text(encoding="utf-8")
+            start_cmd = ""
+            for line in procfile_text.splitlines():
+                if line.strip().startswith("web:"):
+                    start_cmd = line.split(":", 1)[1].strip()
+                    break
+            if not start_cmd:
+                first_line = procfile_text.strip().splitlines()[0]
+                start_cmd = first_line.split(":", 1)[-1].strip()
+        except Exception:
+            start_cmd = ""
+
+        if start_cmd:
+            has_pkg = (path / "package.json").exists()
+            lang = "nodejs" if has_pkg else "python"
+            port = _detect_port(worktree_path, lang)
+            return AppDetection(
+                app_type="procfile",
+                start_cmd=start_cmd,
+                container_port=port,
+                image=_image_for_language(lang),
+                language=lang,
+            )
+
+    # ── Priority 3: Dockerfile ──
     if (path / "Dockerfile").exists():
-        return "dockerfile"
+        port = _detect_port(worktree_path, "docker")
+        return AppDetection(
+            app_type="dockerfile",
+            start_cmd="",
+            container_port=port,
+            image="",  # built from Dockerfile
+            language="docker",
+        )
 
-    # 4. Node.js detection
-    has_package_json = (path / "package.json").exists()
-    has_next_config = any(
-        (path / f).exists()
-        for f in ("next.config.js", "next.config.ts", "next.config.mjs")
-    )
-    if has_next_config:
-        return "nextjs"
-    if has_package_json:
-        return "nodejs"
+    # ── Priority 4: package.json (Node.js / Next.js) ──
+    pkg_path = path / "package.json"
+    if pkg_path.exists():
+        is_nextjs = any(
+            (path / f).exists()
+            for f in ("next.config.js", "next.config.ts", "next.config.mjs")
+        )
+        pkg_start = None
+        try:
+            pkg = _json.loads(pkg_path.read_text(encoding="utf-8"))
+            pkg_start = pkg.get("scripts", {}).get("start")
+        except Exception:
+            pass
 
-    # 5. Python detection
+        port = _detect_port(worktree_path, "nodejs")
+
+        if is_nextjs:
+            return AppDetection(
+                app_type="nextjs",
+                start_cmd=f"npm run dev -- -p {port}",
+                container_port=port,
+                image="node:20-slim",
+                install_cmd="npm install --silent",
+                language="nodejs",
+            )
+
+        if pkg_start:
+            start_cmd = "npm start"
+        else:
+            start_cmd = (
+                "if [ -f server.js ]; then node server.js; "
+                "elif [ -f src/index.js ]; then node src/index.js; "
+                "elif [ -f index.js ]; then node index.js; "
+                "else npm start; fi"
+            )
+        return AppDetection(
+            app_type="nodejs",
+            start_cmd=start_cmd,
+            container_port=port,
+            image="node:20-slim",
+            install_cmd="npm install --silent",
+            language="nodejs",
+        )
+
+    # ── Priority 5: Python (requirements.txt or *.py files) ──
     has_requirements = (path / "requirements.txt").exists()
     has_any_py = any(path.glob("*.py"))
     if has_requirements or has_any_py:
-        return "python"
+        framework, entry = _detect_python_framework(path)
+        port = _detect_port(worktree_path, framework)
 
-    # 6. Static HTML
+        if framework == "fastapi":
+            # Extract the FastAPI app variable name (usually 'app')
+            start_cmd = f"uvicorn {entry.replace('.py', '')}:app --host 0.0.0.0 --port {port}"
+        elif framework == "django":
+            start_cmd = f"python manage.py runserver 0.0.0.0:{port}"
+        else:
+            start_cmd = f"python {entry}"
+
+        install_cmd = ""
+        if has_requirements:
+            install_cmd = "pip install -r requirements.txt -q"
+
+        return AppDetection(
+            app_type=framework,
+            start_cmd=start_cmd,
+            container_port=port,
+            image="python:3.11-slim",
+            install_cmd=install_cmd,
+            language="python",
+        )
+
+    # ── Priority 6: Static HTML ──
     if (path / "index.html").exists():
-        return "static"
+        return AppDetection(
+            app_type="static",
+            start_cmd="python -m http.server 8080",
+            container_port=8080,
+            image="python:3.11-slim",
+            language="static",
+        )
 
-    return "unknown"
+    # ── Priority 7: Unknown ──
+    return AppDetection(
+        app_type="unknown",
+        start_cmd="echo 'Cannot detect how to run this app. Add dalkkak.json with start command and port.'",
+        container_port=8000,
+        image="python:3.11-slim",
+        language="unknown",
+    )
 
 
 async def launch_preview(
@@ -246,26 +521,27 @@ async def launch_preview(
             error="Docker not running — preview unavailable. Start Docker Desktop and retry.",
         )
 
-    app_type = await _detect_startup_type(worktree_path)
+    detection = await _detect_app(worktree_path)
     preview_port = _find_free_port()
     container_name = f"dalkkak-preview-{session_id[:12]}"
     preview_db_url = await _create_preview_db_schema(session_id)
 
     logger.info(
-        "Launching preview: session=%s type=%s port=%d container=%s",
-        session_id, app_type, preview_port, container_name,
+        "Launching preview: session=%s type=%s lang=%s port=%d container=%s",
+        session_id, detection.app_type, detection.language,
+        preview_port, container_name,
     )
 
     # Remove any old container with the same name (idempotent)
     await _run(["docker", "rm", "-f", container_name])
 
-    # Build the docker run command based on app type
+    # Build the docker run command based on detection
     docker_cmd = _build_docker_command(
         container_name=container_name,
         worktree_path=str(path.resolve()),
         preview_port=preview_port,
         preview_db_url=preview_db_url,
-        app_type=app_type,
+        detection=detection,
     )
 
     # Start the container
@@ -306,117 +582,17 @@ def _build_docker_command(
     worktree_path: str,
     preview_port: int,
     preview_db_url: str,
-    app_type: str,
+    detection: AppDetection,
 ) -> list[str]:
     """
     Build the `docker run` command for a preview container.
 
-    Uses the same Python image as the main API (already cached on dev machines).
-    Mounts the worktree as a volume — no image rebuild needed per session.
+    Uses detection result from _detect_app() — all logic for choosing
+    image, port, start command, and install command lives there.
+    This function just assembles the docker CLI arguments.
     """
-    import json as _json
-
-    # Determine start command, container port, and base image based on app type
-    worktree = Path(worktree_path)
-
-    if app_type == "dalkkak":
-        # dalkkak.json — explicit config, always wins
-        conf = _json.loads((worktree / "dalkkak.json").read_text())
-        start_cmd = conf.get("start", "echo 'No start command in dalkkak.json'")
-        container_port = conf.get("port", 8000)
-        lang = conf.get("language", "python")
-        image = "node:20-slim" if lang in ("node", "nodejs", "javascript") else "python:3.11-slim"
-        # Install deps if needed
-        if lang in ("node", "nodejs", "javascript"):
-            start_cmd = f"npm install --silent 2>/dev/null; {start_cmd}"
-        elif (worktree / "requirements.txt").exists():
-            start_cmd = f"pip install -r requirements.txt -q 2>/dev/null; {start_cmd}"
-
-    elif app_type == "procfile":
-        # Read first web: line from Procfile
-        procfile_text = (worktree / "Procfile").read_text()
-        for line in procfile_text.splitlines():
-            if line.startswith("web:"):
-                start_cmd = line.split(":", 1)[1].strip()
-                break
-        else:
-            start_cmd = procfile_text.splitlines()[0].split(":", 1)[-1].strip()
-        container_port = 8000
-        has_pkg = (worktree / "package.json").exists()
-        image = "node:20-slim" if has_pkg else "python:3.11-slim"
-        if has_pkg:
-            start_cmd = f"npm install --silent 2>/dev/null; {start_cmd}"
-        elif (worktree / "requirements.txt").exists():
-            start_cmd = f"pip install -r requirements.txt -q 2>/dev/null; {start_cmd}"
-
-    elif app_type == "dockerfile":
-        # Will be handled differently — build from Dockerfile
-        start_cmd = ""
-        container_port = 8000
-        image = ""  # not used for dockerfile
-
-    elif app_type == "nextjs":
-        start_cmd = "npm install --silent && npm run dev -- -p 3000"
-        container_port = 3000
-        image = "node:20-slim"
-
-    elif app_type == "nodejs":
-        # Read start command from package.json if available
-        pkg_path = worktree / "package.json"
-        pkg_start = None
-        if pkg_path.exists():
-            try:
-                pkg = _json.loads(pkg_path.read_text())
-                pkg_start = pkg.get("scripts", {}).get("start")
-            except Exception:
-                pass
-        if pkg_start:
-            start_cmd = f"npm install --silent 2>/dev/null; npm start"
-        else:
-            start_cmd = (
-                "npm install --silent 2>/dev/null; "
-                "if [ -f server.js ]; then node server.js; "
-                "elif [ -f src/index.js ]; then node src/index.js; "
-                "elif [ -f index.js ]; then node index.js; "
-                "else npm start; fi"
-            )
-        container_port = 3000
-        image = "node:20-slim"
-
-    elif app_type == "python":
-        # Find the Python entry point by checking for server frameworks
-        py_files = list(worktree.glob("*.py"))
-        entry = None
-        for f in py_files:
-            try:
-                content = f.read_text(errors="ignore")
-                if any(kw in content for kw in ("Flask(", "FastAPI(", "app.run(", "uvicorn")):
-                    entry = f.name
-                    break
-            except Exception:
-                continue
-        if not entry and py_files:
-            entry = py_files[0].name
-        start_cmd = (
-            "pip install -r requirements.txt -q 2>/dev/null; "
-            f"python {entry or 'app.py'}"
-        )
-        container_port = 5000
-        image = "python:3.11-slim"
-
-    elif app_type == "static":
-        start_cmd = "python -m http.server 8080"
-        container_port = 8080
-        image = "python:3.11-slim"
-
-    else:  # unknown
-        start_cmd = "echo 'Cannot detect how to run this app. Add dalkkak.json.'"
-        container_port = 8000
-        image = "python:3.11-slim"
-
     # Convert container path (/workspace/...) to host path for Docker volume mount
     # HOST_PROJECT_ROOT must be the absolute host path to the project root
-    import os
     host_root = os.environ.get("HOST_PROJECT_ROOT", "")
     if host_root and worktree_path.startswith("/workspace/"):
         relative = worktree_path[len("/workspace/"):]
@@ -424,23 +600,51 @@ def _build_docker_command(
     else:
         host_path = worktree_path
 
+    # ── Dockerfile type: build image then run ──
+    if detection.app_type == "dockerfile":
+        # Build a tagged image from the Dockerfile, then run it
+        image_tag = f"dalkkak-preview:{container_name}"
+        return [
+            "sh", "-c",
+            f"docker build -t {image_tag} {host_path} && "
+            f"docker run --detach "
+            f"--name {container_name} "
+            f"--publish {preview_port}:{detection.container_port} "
+            f"--env DATABASE_URL='{preview_db_url}' "
+            f"--env ENVIRONMENT=preview "
+            f"--env PORT={detection.container_port} "
+            f"--env SECRET_KEY=preview-{container_name} "
+            f"--add-host host.docker.internal:host-gateway "
+            f"--network factory001_ddalkkak_default "
+            f"{image_tag}",
+        ]
+
+    # ── All other types: mount worktree as volume ──
+    # Build the full shell command: install deps (if any) then start
+    parts: list[str] = []
+    if detection.install_cmd:
+        parts.append(f"{detection.install_cmd} 2>/dev/null")
+    if detection.start_cmd:
+        parts.append(detection.start_cmd)
+    full_cmd = "; ".join(parts) if parts else "echo 'No start command detected'"
+
     return [
         "docker", "run",
         "--detach",
         "--name", container_name,
-        "--publish", f"{preview_port}:{container_port}",
+        "--publish", f"{preview_port}:{detection.container_port}",
         "--volume", f"{host_path}:/app",
         "--workdir", "/app",
         "--env", f"DATABASE_URL={preview_db_url}",
         "--env", "ENVIRONMENT=preview",
-        "--env", f"PORT={container_port}",
+        "--env", f"PORT={detection.container_port}",
         "--env", f"SECRET_KEY=preview-{container_name}",
         "--env", "ANTHROPIC_API_KEY=placeholder",
         # Ensure host.docker.internal resolves on Linux too
         "--add-host", "host.docker.internal:host-gateway",
         "--network", "factory001_ddalkkak_default",
-        image,
-        "sh", "-c", start_cmd,
+        detection.image,
+        "sh", "-c", full_cmd,
     ]
 
 
