@@ -39,10 +39,10 @@ const I18nContext = createContext<I18nContextValue | null>(null);
 
 /** Reads saved language from localStorage (SSR-safe) */
 function getSavedLanguage(): Language {
-  if (typeof window === "undefined") return "ko";
+  if (typeof window === "undefined") return "en";
   const saved = localStorage.getItem(STORAGE_KEY);
   if (saved === "ko" || saved === "en") return saved;
-  return "ko";
+  return "en";
 }
 
 interface LanguageProviderProps {
@@ -62,7 +62,7 @@ interface LanguageProviderProps {
  * ```
  */
 export function LanguageProvider({ children, defaultLang }: LanguageProviderProps) {
-  const [lang, setLangState] = useState<Language>(defaultLang ?? "ko");
+  const [lang, setLangState] = useState<Language>(defaultLang ?? "en");
 
   // Hydrate from localStorage after mount to avoid SSR mismatch
   useEffect(() => {
