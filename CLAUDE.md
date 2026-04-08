@@ -39,11 +39,18 @@ This rule exists because Claude repeatedly said "fixed" without testing, wasting
 
 **Verification checklist — do ALL that apply:**
 - Backend API change → `curl` the endpoint, paste the response
-- Frontend change → `curl localhost:3001` or check browser renders without error
+- Frontend change → `cd frontend && npx next build` MUST pass (production build, not dev)
 - Docker change → `docker-compose up --build` + `docker ps` shows healthy
 - Preview/Test feature → actually click Test button, show the URL works
 - WebSocket change → connect and send a message, show the response
 - DB change → query the DB, show the row exists
+- **EVERY frontend change → `npx next build` before commit. Dev mode is NOT enough.**
+
+**RULE #0.1 — WRITE PRODUCTION-READY CODE (NON-NEGOTIABLE)**
+- Never use features that work in `next dev` but break in `next build` (e.g., Route Groups with special characters)
+- Always test with production build before saying "done"
+- If Vercel/Render deployment fails → it's Claude's fault, not Jason's
+- All code must work on: localhost (dev) + Docker (staging) + Vercel/Render (production)
 
 **The workflow is:**
 ```
